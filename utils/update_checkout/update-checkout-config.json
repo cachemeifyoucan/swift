@@ -156,6 +156,47 @@
                 "swift-installer-scripts": "main"
             }
         },
+        "cas": {
+            "aliases": ["cas", "experimental/cas/rebranch"],
+            "repos": {
+                "llvm-project": "experimental/cas/rebranch",
+                "swift": "experimental/cas/rebranch",
+                "cmark": "main",
+                "llbuild": "main",
+                "swift-tools-support-core": "main",
+                "swiftpm": "main",
+                "swift-argument-parser": "1.0.1",
+                "swift-atomics": "1.0.2",
+                "swift-collections": "1.0.1",
+                "swift-crypto": "1.1.5",
+                "swift-driver": "main",
+                "swift-numerics": "1.0.1",
+                "swift-syntax": "main",
+                "swift-system": "1.1.1",
+                "swift-stress-tester": "main",
+                "swift-corelibs-xctest": "main",
+                "swift-corelibs-foundation": "main",
+                "swift-corelibs-libdispatch": "main",
+                "swift-integration-tests": "main",
+                "swift-xcode-playground-support": "main",
+                "ninja": "release",
+                "icu": "release-65-1",
+                "yams": "4.0.2",
+                "cmake": "v3.19.6",
+                "indexstore-db": "main",
+                "sourcekit-lsp": "main",
+                "swift-format": "main",
+                "swift-installer-scripts": "main",
+                "swift-docc": "main",
+                "swift-lmdb": "main",
+                "swift-docc-render-artifact": "main",
+                "swift-docc-symbolkit": "main",
+                "swift-markdown": "main",
+                "swift-cmark-gfm": "gfm",
+                "swift-nio": "2.31.2",
+                "swift-nio-ssl": "2.15.0"
+            }
+        },
        "release/5.5": {
             "aliases": ["release/5.5", "swift/release/5.5"],
             "repos": {
