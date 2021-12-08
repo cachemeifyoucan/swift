@@ -482,6 +482,12 @@ def parse_preset_args():
         help="Reconfigure all projects as we build",
         action="store_true",
         default=False)
+    parser.add_argument(
+        "--cas",
+        help="use CAS depscan and result cache",
+        action=argparse.actions.StoreTrueAction,
+        nargs=argparse.Nargs.OPTIONAL,
+        default=os.environ.get('USE_CAS') == '1')
 
     return parser.parse_args()
 
@@ -563,6 +569,8 @@ def main_preset():
         build_script_args += ["--cmake-c-launcher", args.cmake_c_launcher]
     if args.cmake_cxx_launcher:
         build_script_args += ["--cmake-cxx-launcher", args.cmake_cxx_launcher]
+    if args.cas:
+        build_script_args += ["--cas"]
     printable_command = shell.quote_command(build_script_args)
     if args.expand_invocation:
         print(printable_command)

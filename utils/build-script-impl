@@ -84,6 +84,7 @@ KNOWN_SETTINGS=(
     distcc                                        ""                "use distcc in pump mode"
     distcc-pump                                   ""                "the path to distcc pump executable. This argument is required if distcc is set."
     ninja-bin                                     ""                "the path to Ninja tool"
+    cas                                           ""                "use CAS based tools"
 
     ## Android Options
     android-api-level                             ""                "The Android API level to target when building for Android. Currently only 21 or above is supported"
@@ -1299,6 +1300,10 @@ function calculate_targets_for_host() {
 
 COMMON_C_FLAGS=" -Wno-unknown-warning-option -Werror=unguarded-availability-new"
 
+if [[ -n "${CAS}" ]]; then
+  COMMON_C_FLAGS+=" -fdepscan -fdepscan-share-parent=ninja -fdepscan-share-stop=cmake"
+fi
+
 # Convert to an array.
 eval COMMON_CMAKE_OPTIONS=(${COMMON_CMAKE_OPTIONS})
 eval EXTRA_CMAKE_OPTIONS=(${EXTRA_CMAKE_OPTIONS})
@@ -1630,6 +1635,15 @@ for host in "${ALL_HOSTS[@]}"; do
         -DCMAKE_INSTALL_PREFIX:PATH="$(get_host_install_prefix ${host})"
         -DINTERNAL_INSTALL_PREFIX="local"
     )
+
+    if [[ -n "${CAS}" ]]; then
+        llvm_cmake_options=(
+            "${llvm_cmake_options[@]}"
+            -DLLVM_ENABLE_EXPERIMENTAL_DEPSCAN_TABLEGEN=ON
+            -DLLVM_ENABLE_EXPERIMENTAL_DEPSCAN=ON
+            -DLLVM_ENABLE_EXPERIMENTAL_CAS_TOKEN_CACHE=ON
+        )
+    fi
 
     if [[ "$(uname -s)" == "Linux" ]] ; then
         if [[ $(is_cmake_debuginfo_build_type "${LLVM_BUILD_TYPE}") ]] ; then
