@@ -823,6 +823,7 @@ public:
     case ReferenceCounting::Unknown:
     case ReferenceCounting::ObjC:
     case ReferenceCounting::Block:
+    case ReferenceCounting::None:
       return true;
 
     case ReferenceCounting::Bridge:
@@ -1007,9 +1008,9 @@ private:
   
 //--- Globals ---------------------------------------------------------------
 public:
-  std::pair<llvm::GlobalVariable *, llvm::Constant *>
-  createStringConstant(StringRef Str, bool willBeRelativelyAddressed = false,
-                       StringRef sectionName = "");
+  std::pair<llvm::GlobalVariable *, llvm::Constant *> createStringConstant(
+      StringRef Str, bool willBeRelativelyAddressed = false,
+      StringRef sectionName = "", StringRef name = "");
   llvm::Constant *getAddrOfGlobalString(StringRef utf8,
                                         bool willBeRelativelyAddressed = false);
   llvm::Constant *getAddrOfGlobalUTF16String(StringRef utf8);

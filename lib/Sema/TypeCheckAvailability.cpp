@@ -1710,6 +1710,9 @@ void TypeChecker::checkConcurrencyAvailability(SourceRange ReferenceRange,
   ASTContext &ctx = ReferenceDC->getASTContext();
   if (ctx.LangOpts.DisableAvailabilityChecking)
     return;
+
+  if (!shouldCheckAvailability(ReferenceDC->getAsDecl()))
+    return;
   
   auto runningOS =
     TypeChecker::overApproximateAvailabilityAtLocation(
@@ -3149,10 +3152,12 @@ diagnoseDeclUnavailableFromAsync(const ValueDecl *D, SourceRange R,
     return false;
 
   ASTContext &ctx = Where.getDeclContext()->getASTContext();
+  const UnavailableFromAsyncAttr *attr =
+      D->getAttrs().getAttribute<UnavailableFromAsyncAttr>();
   SourceLoc diagLoc = call ? call->getLoc() : R.Start;
   ctx.Diags
       .diagnose(diagLoc, diag::async_unavailable_decl, D->getDescriptiveKind(),
-                D->getBaseName())
+                D->getBaseName(), attr->hasMessage(), attr->Message)
       .warnUntilSwiftVersion(6);
   D->diagnose(diag::decl_declared_here, D->getName());
   return true;

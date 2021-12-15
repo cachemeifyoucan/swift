@@ -496,7 +496,8 @@ private:
 
 public:
   /// Construct a new generic signature builder.
-  explicit GenericSignatureBuilder(ASTContext &ctx);
+  explicit GenericSignatureBuilder(ASTContext &ctx,
+                                   bool requirementSignature=false);
   GenericSignatureBuilder(GenericSignatureBuilder &&);
   ~GenericSignatureBuilder();
 
@@ -570,7 +571,6 @@ public:
   ConstraintResult addRequirement(const Requirement &req,
                                   const RequirementRepr *reqRepr,
                                   FloatingRequirementSource source,
-                                  const SubstitutionMap *subMap,
                                   ModuleDecl *inferForModule);
 
   /// Add all of a generic signature's parameters and requirements.

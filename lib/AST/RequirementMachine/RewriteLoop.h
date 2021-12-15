@@ -16,7 +16,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/DenseMap.h"
 
-
 #include "Symbol.h"
 #include "Term.h"
 
@@ -29,52 +28,16 @@ namespace swift {
 namespace rewriting {
 
 class RewriteSystem;
+struct RewritePathEvaluator;
 
-/// A rewrite path is a list of instructions for a two-stack interpreter.
-///
-/// - ApplyRewriteRule and AdjustConcreteType manipulate the term at the top of
-///   the A stack.
-///
-/// - Shift moves a term from A to B (if not inverted) or B to A (if inverted).
-///
-/// - Decompose splits off the substitutions from a superclass or concrete type
-///   symbol at the top of the A stack (if not inverted) or assembles a new
-///   superclass or concrete type symbol at the top of the A stack
-///   (if inverted).
-struct RewritePathEvaluator {
-  SmallVector<MutableTerm, 2> A;
-  SmallVector<MutableTerm, 2> B;
-
-  explicit RewritePathEvaluator(const MutableTerm &term) {
-    A.push_back(term);
-  }
-
-  void checkA() const;
-  void checkB() const;
-
-  MutableTerm &getCurrentTerm();
-
-  /// We're "in context" if we're in the middle of rewriting concrete
-  /// substitutions.
-  bool isInContext() const {
-    assert(A.size() > 0);
-    return (A.size() > 1 || B.size() > 0);
-  }
-
-  void dump(llvm::raw_ostream &out) const;
-};
-
-/// Return value of RewriteStep::applyRewriteRule();
-struct AppliedRewriteStep {
-  Term lhs;
-  Term rhs;
-  MutableTerm prefix;
-  MutableTerm suffix;
-};
 
 /// Records an evaluation step in a rewrite path.
 struct RewriteStep {
   enum StepKind : unsigned {
+    ///
+    /// *** Rewrite step kinds introduced by Knuth-Bendix completion ***
+    ///
+
     /// Apply a rewrite rule to the term at the top of the A stack.
     ///
     /// Formally, this is a whiskered, oriented rewrite rule. For example,
@@ -101,6 +64,10 @@ struct RewriteStep {
     /// The StartOffset field encodes the length of the prefix.
     AdjustConcreteType,
 
+    ///
+    /// *** Rewrite step kinds introduced by simplifySubstitutions() ***
+    ///
+
     /// Move a term from the A stack to the B stack (if not inverted) or
     /// B stack to A stack (if inverted).
     Shift,
@@ -114,19 +81,71 @@ struct RewriteStep {
     /// new substitutions replace the substitutions in that symbol.
     ///
     /// The RuleID field encodes the number of substitutions.
-    Decompose
+    Decompose,
+
+    ///
+    /// *** Rewrite step kinds introduced by the property map ***
+    ///
+
+    /// If not inverted: the top of the A stack must be a term ending in a
+    /// concrete type symbol [concrete: C] followed by a protocol symbol [P].
+    /// These two symbols are combined into a single concrete conformance
+    /// symbol [concrete: C : P].
+    ///
+    /// If inverted: the top of the A stack must be a term ending in a
+    /// concrete conformance symbol [concrete: C : P]. This symbol is replaced
+    /// with the concrete type symbol [concrete: C] followed by the protocol
+    /// symbol [P].
+    ConcreteConformance,
+
+    /// If not inverted: the top of the A stack must be a term ending in a
+    /// superclass symbol [superclass: C] followed by a protocol symbol [P].
+    /// These two symbols are combined into a single concrete conformance
+    /// symbol [concrete: C : P].
+    ///
+    /// If inverted: the top of the A stack must be a term ending in a
+    /// concrete conformance symbol [concrete: C : P]. This symbol is replaced
+    /// with the superclass symbol [superclass: C] followed by the protocol
+    /// symbol [P].
+    SuperclassConformance,
+
+    /// If not inverted: the top of the A stack must be a term ending in a
+    /// concrete conformance symbol [concrete: C : P] followed by an associated
+    /// type symbol [P:X], and the concrete type symbol [concrete: C.X] for the
+    /// type witness of 'X' in the conformance 'C : P'. The concrete type symbol
+    /// is eliminated.
+    ///
+    /// If inverted: the concrete type symbol [concrete: C.X] is introduced.
+    ///
+    /// The RuleID field is repurposed to store the result of calling
+    /// RewriteSystem::recordConcreteTypeWitness(). This index is then
+    /// passed in to RewriteSystem::getConcreteTypeWitness() when applying
+    /// the step.
+    ConcreteTypeWitness,
+
+    /// If not inverted: the top of the A stack must be a term ending in a
+    /// concrete conformance symbol [concrete: C : P] followed by an associated
+    /// type symbol [P:X]. The associated type symbol is eliminated.
+    ///
+    /// If inverted: the associated type symbol [P:X] is introduced.
+    ///
+    /// The RuleID field is repurposed to store the result of calling
+    /// RewriteSystem::recordConcreteTypeWitness(). This index is then
+    /// passed in to RewriteSystem::getConcreteTypeWitness() when applying
+    /// the step.
+    SameTypeWitness,
   };
 
   /// The rewrite step kind.
-  StepKind Kind : 2;
+  StepKind Kind : 3;
 
   /// The size of the left whisker, which is the position within the term where
   /// the rule is being applied. In A.(X => Y).B, this is |A|=1.
-  unsigned StartOffset : 15;
+  unsigned StartOffset : 14;
 
   /// The size of the right whisker, which is the length of the remaining suffix
   /// after the rule is applied. In A.(X => Y).B, this is |B|=1.
-  unsigned EndOffset : 15;
+  unsigned EndOffset : 14;
 
   /// If Kind is ApplyRewriteRule, the index of the rule in the rewrite system.
   ///
@@ -158,8 +177,9 @@ struct RewriteStep {
     return RewriteStep(ApplyRewriteRule, startOffset, endOffset, ruleID, inverse);
   }
 
-  static RewriteStep forAdjustment(unsigned offset, bool inverse) {
-    return RewriteStep(AdjustConcreteType, /*startOffset=*/0, /*endOffset=*/0,
+  static RewriteStep forAdjustment(unsigned offset, unsigned endOffset,
+                                   bool inverse) {
+    return RewriteStep(AdjustConcreteType, /*startOffset=*/0, endOffset,
                        /*ruleID=*/offset, inverse);
   }
 
@@ -173,6 +193,26 @@ struct RewriteStep {
                        /*ruleID=*/numSubstitutions, inverse);
   }
 
+  static RewriteStep forConcreteConformance(bool inverse) {
+    return RewriteStep(ConcreteConformance, /*startOffset=*/0, /*endOffset=*/0,
+                       /*ruleID=*/0, inverse);
+  }
+
+  static RewriteStep forSuperclassConformance(bool inverse) {
+    return RewriteStep(SuperclassConformance, /*startOffset=*/0, /*endOffset=*/0,
+                       /*ruleID=*/0, inverse);
+  }
+
+  static RewriteStep forConcreteTypeWitness(unsigned witnessID, bool inverse) {
+    return RewriteStep(ConcreteTypeWitness, /*startOffset=*/0, /*endOffset=*/0,
+                       /*ruleID=*/witnessID, inverse);
+  }
+
+  static RewriteStep forSameTypeWitness(unsigned witnessID, bool inverse) {
+    return RewriteStep(SameTypeWitness, /*startOffset=*/0, /*endOffset=*/0,
+                       /*ruleID=*/witnessID, inverse);
+  }
+
   bool isInContext() const {
     return StartOffset > 0 || EndOffset > 0;
   }
@@ -180,21 +220,6 @@ struct RewriteStep {
   void invert() {
     Inverse = !Inverse;
   }
-
-  AppliedRewriteStep applyRewriteRule(RewritePathEvaluator &evaluator,
-                                      const RewriteSystem &system) const;
-
-  MutableTerm applyAdjustment(RewritePathEvaluator &evaluator,
-                              const RewriteSystem &system) const;
-
-  void applyShift(RewritePathEvaluator &evaluator,
-                  const RewriteSystem &system) const;
-
-  void applyDecompose(RewritePathEvaluator &evaluator,
-                      const RewriteSystem &system) const;
-
-  void apply(RewritePathEvaluator &evaluator,
-             const RewriteSystem &system) const;
 
   bool isInverseOf(const RewriteStep &other) const;
 
@@ -245,13 +270,6 @@ public:
 
   bool replaceRuleWithPath(unsigned ruleID, const RewritePath &path);
 
-  bool computeFreelyReducedPath();
-
-  bool computeCyclicallyReducedLoop(MutableTerm &basepoint,
-                                    const RewriteSystem &system);
-
-  bool computeLeftCanonicalForm(const RewriteSystem &system);
-
   void invert();
 
   void dump(llvm::raw_ostream &out,
@@ -290,8 +308,6 @@ public:
     Deleted = true;
   }
 
-  void normalize(const RewriteSystem &system);
-
   bool isInContext(const RewriteSystem &system) const;
 
   llvm::SmallVector<unsigned, 1>
@@ -303,6 +319,73 @@ public:
       const RewriteSystem &system) const;
 
   void dump(llvm::raw_ostream &out, const RewriteSystem &system) const;
+};
+
+/// Return value of RewritePathEvaluator::applyRewriteRule();
+struct AppliedRewriteStep {
+  Term lhs;
+  Term rhs;
+  MutableTerm prefix;
+  MutableTerm suffix;
+};
+
+/// A rewrite path is a list of instructions for a two-stack interpreter.
+///
+/// - ApplyRewriteRule and AdjustConcreteType manipulate the term at the top of
+///   the A stack.
+///
+/// - Shift moves a term from A to B (if not inverted) or B to A (if inverted).
+///
+/// - Decompose splits off the substitutions from a superclass or concrete type
+///   symbol at the top of the A stack (if not inverted) or assembles a new
+///   superclass or concrete type symbol at the top of the A stack
+///   (if inverted).
+struct RewritePathEvaluator {
+  SmallVector<MutableTerm, 2> A;
+  SmallVector<MutableTerm, 2> B;
+
+  explicit RewritePathEvaluator(const MutableTerm &term) {
+    A.push_back(term);
+  }
+
+  void checkA() const;
+  void checkB() const;
+
+  MutableTerm &getCurrentTerm();
+
+  /// We're "in context" if we're in the middle of rewriting concrete
+  /// substitutions.
+  bool isInContext() const {
+    assert(A.size() > 0);
+    return (A.size() > 1 || B.size() > 0);
+  }
+
+  void apply(const RewriteStep &step,
+             const RewriteSystem &system);
+
+  AppliedRewriteStep applyRewriteRule(const RewriteStep &step,
+                                      const RewriteSystem &system);
+
+  std::pair<MutableTerm, MutableTerm>
+  applyAdjustment(const RewriteStep &step,
+                  const RewriteSystem &system);
+
+  void applyShift(const RewriteStep &step,
+                  const RewriteSystem &system);
+
+  void applyDecompose(const RewriteStep &step,
+                      const RewriteSystem &system);
+
+  void applyConcreteConformance(const RewriteStep &step,
+                                const RewriteSystem &system);
+
+  void applyConcreteTypeWitness(const RewriteStep &step,
+                                const RewriteSystem &system);
+
+  void applySameTypeWitness(const RewriteStep &step,
+                            const RewriteSystem &system);
+
+  void dump(llvm::raw_ostream &out) const;
 };
 
 } // end namespace rewriting

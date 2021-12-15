@@ -130,22 +130,18 @@ static void desugarConformanceRequirement(Type subjectType, Type constraintType,
     return;
   }
 
-  auto layout = constraintType->getExistentialLayout();
+  auto *compositionType = constraintType->castTo<ProtocolCompositionType>();
+  if (compositionType->hasExplicitAnyObject()) {
+    desugarLayoutRequirement(subjectType,
+                             LayoutConstraint::getLayoutConstraint(
+                                 LayoutConstraintKind::Class), result);
+  }
 
-  if (auto layoutConstraint = layout.getLayoutConstraint())
-    desugarLayoutRequirement(subjectType, layoutConstraint, result);
-
-  if (auto superclass = layout.explicitSuperclass)
-    desugarSuperclassRequirement(subjectType, superclass, result);
-
-  for (auto *proto : layout.getProtocols()) {
-    if (!subjectType->isTypeParameter()) {
-      // FIXME: Check conformance, diagnose redundancy or conflict upstream
-      return;
-    }
-
-    result.emplace_back(RequirementKind::Conformance, subjectType,
-                        proto);
+  for (auto memberType : compositionType->getMembers()) {
+    if (memberType->isExistentialType())
+      desugarConformanceRequirement(subjectType, memberType, result);
+    else
+      desugarSuperclassRequirement(subjectType, memberType, result);
   }
 }
 
@@ -346,12 +342,6 @@ void swift::rewriting::realizeRequirement(
     ModuleDecl *moduleForInference,
     SmallVectorImpl<StructuralRequirement> &result) {
   auto firstType = req.getFirstType();
-  if (moduleForInference) {
-    auto firstLoc = (reqRepr ? reqRepr->getFirstTypeRepr()->getStartLoc()
-                             : SourceLoc());
-    inferRequirements(firstType, firstLoc, moduleForInference, result);
-  }
-
   auto loc = (reqRepr ? reqRepr->getSeparatorLoc() : SourceLoc());
 
   switch (req.getKind()) {
@@ -359,7 +349,11 @@ void swift::rewriting::realizeRequirement(
   case RequirementKind::Conformance: {
     auto secondType = req.getSecondType();
     if (moduleForInference) {
-      auto secondLoc = (reqRepr ? reqRepr->getSecondTypeRepr()->getStartLoc()
+      auto firstLoc = (reqRepr ? reqRepr->getSubjectRepr()->getStartLoc()
+                               : SourceLoc());
+      inferRequirements(firstType, firstLoc, moduleForInference, result);
+
+      auto secondLoc = (reqRepr ? reqRepr->getConstraintRepr()->getStartLoc()
                                 : SourceLoc());
       inferRequirements(secondType, secondLoc, moduleForInference, result);
     }
@@ -369,6 +363,12 @@ void swift::rewriting::realizeRequirement(
   }
 
   case RequirementKind::Layout: {
+    if (moduleForInference) {
+      auto firstLoc = (reqRepr ? reqRepr->getSubjectRepr()->getStartLoc()
+                               : SourceLoc());
+      inferRequirements(firstType, firstLoc, moduleForInference, result);
+    }
+
     SmallVector<Requirement, 2> reqs;
     desugarLayoutRequirement(firstType, req.getLayoutConstraint(), reqs);
 
@@ -381,6 +381,10 @@ void swift::rewriting::realizeRequirement(
   case RequirementKind::SameType: {
     auto secondType = req.getSecondType();
     if (moduleForInference) {
+      auto firstLoc = (reqRepr ? reqRepr->getFirstTypeRepr()->getStartLoc()
+                               : SourceLoc());
+      inferRequirements(firstType, firstLoc, moduleForInference, result);
+
       auto secondLoc = (reqRepr ? reqRepr->getSecondTypeRepr()->getStartLoc()
                                 : SourceLoc());
       inferRequirements(secondType, secondLoc, moduleForInference, result);
@@ -924,9 +928,7 @@ void RuleBuilder::addRequirement(const Requirement &req,
       // Build the symbol [layout: L].
       auto layout =
         LayoutConstraint::getLayoutConstraint(
-          otherType->getClassOrBoundGenericClass()->usesObjCObjectModel()
-            ? LayoutConstraintKind::Class
-            : LayoutConstraintKind::NativeClass,
+          otherType->getClassOrBoundGenericClass()->getLayoutConstraintKind(),
           Context.getASTContext());
       auto layoutSymbol = Symbol::forLayout(layout, Context);
 

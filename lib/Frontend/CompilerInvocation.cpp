@@ -263,6 +263,11 @@ void CompilerInvocation::setSDKPath(const std::string &Path) {
   updateRuntimeLibraryPaths(SearchPathOpts, LangOpts.Target);
 }
 
+bool CompilerInvocation::setModuleAliasMap(std::vector<std::string> args,
+                                           DiagnosticEngine &diags) {
+  return ModuleAliasesConverter::computeModuleAliases(args, FrontendOpts, diags);
+}
+
 static bool ParseFrontendArgs(
     FrontendOptions &opts, ArgList &args, DiagnosticEngine &diags,
     SmallVectorImpl<std::unique_ptr<llvm::MemoryBuffer>> *buffers) {
@@ -437,6 +442,9 @@ static bool ParseLangArgs(LangOptions &Opts, ArgList &Args,
 
   Opts.EnableExperimentalNamedOpaqueTypes |=
       Args.hasArg(OPT_enable_experimental_named_opaque_types);
+
+  Opts.EnableExplicitExistentialTypes |=
+      Args.hasArg(OPT_enable_explicit_existential_types);
 
   Opts.EnableExperimentalDistributed |=
     Args.hasArg(OPT_enable_experimental_distributed);
@@ -889,6 +897,12 @@ static bool ParseLangArgs(LangOptions &Opts, ArgList &Args,
     else
       Diags.diagnose(SourceLoc(), diag::error_invalid_arg_value,
                      A->getAsString(Args), A->getValue());
+  }
+
+  if (auto A = Args.getLastArg(OPT_enable_requirement_machine_merged_associated_types,
+                               OPT_disable_requirement_machine_merged_associated_types)) {
+    Opts.RequirementMachineMergedAssociatedTypes
+      = A->getOption().matches(OPT_enable_requirement_machine_merged_associated_types);
   }
 
   Opts.DumpRequirementMachine = Args.hasArg(
@@ -1449,25 +1463,112 @@ static bool ParseSILArgs(SILOptions &Opts, ArgList &Args,
   // -Ounchecked might also set removal of runtime asserts (cond_fail).
   Opts.RemoveRuntimeAsserts |= Args.hasArg(OPT_RemoveRuntimeAsserts);
 
-  // If experimental move only is enabled, always enable lexical lifetime as
-  // well. Move only depends on lexical lifetimes.
-  bool enableExperimentalLexicalLifetimes =
-      Args.hasArg(OPT_enable_lexical_lifetimes) ||
-      Args.hasArg(OPT_enable_experimental_move_only);
-  // Error if both experimental lexical lifetimes and disable lexical lifetimes
-  // are both set.
-  if (enableExperimentalLexicalLifetimes &&
-      Args.hasArg(OPT_disable_lexical_lifetimes)) {
-    return true;
-  } else {
-    if (enableExperimentalLexicalLifetimes)
-      Opts.LexicalLifetimes = LexicalLifetimesOption::ExperimentalLate;
-    if (Args.hasArg(OPT_disable_lexical_lifetimes))
-      Opts.LexicalLifetimes = LexicalLifetimesOption::Off;
+  Optional<bool> enableLexicalBorrowScopesFlag;
+  if (Arg *A = Args.getLastArg(OPT_enable_lexical_borrow_scopes)) {
+    enableLexicalBorrowScopesFlag =
+        llvm::StringSwitch<Optional<bool>>(A->getValue())
+            .Case("true", true)
+            .Case("false", false)
+            .Default(None);
+  }
+  Optional<bool> enableLexicalLifetimesFlag;
+  if (Arg *A = Args.getLastArg(OPT_enable_lexical_lifetimes)) {
+    enableLexicalLifetimesFlag =
+        llvm::StringSwitch<Optional<bool>>(A->getValue())
+            .Case("true", true)
+            .Case("false", false)
+            .Default(None);
+  }
+  if (Args.getLastArg(OPT_enable_lexical_lifetimes_noArg)) {
+    if (!enableLexicalLifetimesFlag.getValueOr(true)) {
+      // Error if lexical lifetimes have been disabled via the meta-var form
+      // and enabled via the flag.
+      Diags.diagnose(SourceLoc(), diag::error_invalid_arg_combination,
+                     "enable-lexical-lifetimes",
+                     "enable-lexical-lifetimes=false");
+      return true;
+    } else {
+      enableLexicalLifetimesFlag = true;
+    }
   }
 
-  Opts.EnableCopyPropagation |= Args.hasArg(OPT_enable_copy_propagation);
-  Opts.DisableCopyPropagation |= Args.hasArg(OPT_disable_copy_propagation);
+  if (enableLexicalLifetimesFlag.getValueOr(false) &&
+      !enableLexicalBorrowScopesFlag.getValueOr(true)) {
+    // Error if lexical lifetimes have been enabled but lexical borrow scopes--
+    // on which they are dependent--have been disabled.
+    Diags.diagnose(SourceLoc(), diag::error_invalid_arg_combination,
+                   "enable-lexical-lifetimes=true",
+                   "enable-lexical-borrow-scopes=false");
+    return true;
+  }
+
+  if (Args.hasArg(OPT_enable_experimental_move_only) &&
+      !enableLexicalBorrowScopesFlag.getValueOr(true)) {
+    // Error if move-only is enabled and lexical borrow scopes--on which it
+    // depends--has been disabled.
+    Diags.diagnose(SourceLoc(), diag::error_invalid_arg_combination,
+                   "enable-experimental-move-only",
+                   "enable-lexical-borrow-scopes=false");
+    return true;
+  }
+
+  if (Args.hasArg(OPT_enable_experimental_move_only) &&
+      !enableLexicalLifetimesFlag.getValueOr(true)) {
+    // Error if move-only is enabled and lexical lifetimes--on which it
+    // depends--has been disabled.
+    Diags.diagnose(SourceLoc(), diag::error_invalid_arg_combination,
+                   "enable-experimental-move-only",
+                   "enable-lexical-lifetimes=false");
+    return true;
+  }
+
+  // -enable-copy-propagation implies -enable-lexical-lifetimes unless
+  // otherwise specified.
+  if (Args.hasArg(OPT_enable_copy_propagation))
+    Opts.LexicalLifetimes = LexicalLifetimesOption::On;
+
+  // -disable-copy-propagation implies -enable-lexical-lifetimes=false
+  if (Args.hasArg(OPT_disable_copy_propagation))
+    Opts.LexicalLifetimes = LexicalLifetimesOption::DiagnosticMarkersOnly;
+
+  // If move-only is enabled, always enable lexical lifetime as well.  Move-only
+  // depends on lexical lifetimes.
+  if (Args.hasArg(OPT_enable_experimental_move_only))
+    Opts.LexicalLifetimes = LexicalLifetimesOption::On;
+
+  if (enableLexicalLifetimesFlag) {
+    if (*enableLexicalLifetimesFlag) {
+      Opts.LexicalLifetimes = LexicalLifetimesOption::On;
+    } else {
+      Opts.LexicalLifetimes = LexicalLifetimesOption::DiagnosticMarkersOnly;
+    }
+  }
+  if (enableLexicalBorrowScopesFlag) {
+    if (*enableLexicalBorrowScopesFlag) {
+      Opts.LexicalLifetimes = LexicalLifetimesOption::DiagnosticMarkersOnly;
+    } else {
+      Opts.LexicalLifetimes = LexicalLifetimesOption::Off;
+    }
+  }
+
+  if (Args.hasArg(OPT_enable_copy_propagation) &&
+      Args.hasArg(OPT_disable_copy_propagation)) {
+    // Error if copy propagation is enabled and copy propagation is disabled.
+    Diags.diagnose(SourceLoc(), diag::error_invalid_arg_combination,
+                   "enable-copy-propagation", "disable-copy-propagation");
+    return true;
+  } else if (Args.hasArg(OPT_enable_copy_propagation) &&
+             !Args.hasArg(OPT_disable_copy_propagation)) {
+    Opts.CopyPropagation = CopyPropagationOption::On;
+  } else if (!Args.hasArg(OPT_enable_copy_propagation) &&
+             Args.hasArg(OPT_disable_copy_propagation)) {
+    Opts.CopyPropagation = CopyPropagationOption::Off;
+  } else /*if (!Args.hasArg(OPT_enable_copy_propagation) &&
+            !Args.hasArg(OPT_disable_copy_propagation))*/
+  {
+    Opts.CopyPropagation = CopyPropagationOption::RequestedPassesOnly;
+  }
+
   Opts.EnableARCOptimizations &= !Args.hasArg(OPT_disable_arc_opts);
   Opts.EnableOSSAModules |= Args.hasArg(OPT_enable_ossa_modules);
   Opts.EnableOSSAOptimizations &= !Args.hasArg(OPT_disable_ossa_opts);

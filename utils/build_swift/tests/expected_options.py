@@ -131,6 +131,7 @@ EXPECTED_DEFAULTS = {
     'cmark_build_variant': 'Debug',
     'compiler_vendor': defaults.COMPILER_VENDOR,
     'coverage_db': None,
+    'cross_compile_deps_path': None,
     'cross_compile_hosts': [],
     'darwin_deployment_version_ios':
         defaults.DARWIN_DEPLOYMENT_VERSION_IOS,
@@ -218,6 +219,7 @@ EXPECTED_DEFAULTS = {
     'swift_disable_dead_stripping': False,
     'swift_darwin_module_archs': None,
     'swift_darwin_supported_archs': None,
+    'swift_freestanding_is_darwin': False,
     'swift_stdlib_assertions': True,
     'swift_stdlib_build_variant': 'Debug',
     'swift_tools_max_parallel_lto_link_jobs':
@@ -681,6 +683,7 @@ EXPECTED_OPTIONS = [
     StrOption('--stdlib-deployment-targets'),
     StrOption('--swift-darwin-module-archs'),
     StrOption('--swift-darwin-supported-archs'),
+    SetTrueOption('--swift-freestanding-is-darwin'),
 
     PathOption('--android-deploy-device-path'),
     PathOption('--android-icu-i18n'),
@@ -694,6 +697,7 @@ EXPECTED_OPTIONS = [
     PathOption('--clang-profile-instr-use'),
     PathOption('--cmake'),
     PathOption('--coverage-db'),
+    PathOption('--cross-compile-deps-path'),
     PathOption('--host-cc'),
     PathOption('--host-cxx'),
     PathOption('--host-libtool'),

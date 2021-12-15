@@ -1478,7 +1478,7 @@ DirectLookupRequest::evaluate(Evaluator &evaluator,
     } else if (isa_and_nonnull<clang::RecordDecl>(decl->getClangDecl())) {
       auto allFound = evaluateOrDefault(
           ctx.evaluator,
-          ClangRecordMemberLookup({cast<StructDecl>(decl), name}), {});
+          ClangRecordMemberLookup({cast<NominalTypeDecl>(decl), name}), {});
       // Add all the members we found, later we'll combine these with the
       // existing members.
       for (auto found : allFound)
@@ -1657,6 +1657,12 @@ static void extractDirectlyReferencedNominalTypes(
         decls.push_back(superclassDecl);
     }
 
+    return;
+  }
+
+  if (auto existential = type->getAs<ExistentialType>()) {
+    extractDirectlyReferencedNominalTypes(
+        existential->getConstraintType(), decls);
     return;
   }
 
@@ -2319,6 +2325,7 @@ directReferencesForTypeRepr(Evaluator &evaluator,
 
   case TypeReprKind::OpaqueReturn:
   case TypeReprKind::NamedOpaqueReturn:
+  case TypeReprKind::Existential:
     return { };
 
   case TypeReprKind::Fixed:

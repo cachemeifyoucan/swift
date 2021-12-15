@@ -2754,6 +2754,16 @@ class Serializer::DeclSerializer : public DeclVisitor<DeclSerializer> {
       TypeSequenceDeclAttrLayout::emitRecord(S.Out, S.ScratchRecord, abbrCode);
       return;
     }
+
+    case DAK_UnavailableFromAsync: {
+      auto abbrCode =
+          S.DeclTypeAbbrCodes[UnavailableFromAsyncDeclAttrLayout::Code];
+      auto *theAttr = cast<UnavailableFromAsyncAttr>(DA);
+      UnavailableFromAsyncDeclAttrLayout::emitRecord(
+          S.Out, S.ScratchRecord, abbrCode, theAttr->isImplicit(),
+          theAttr->Message);
+      return;
+    }
     }
   }
 
@@ -3278,10 +3288,6 @@ public:
         binding->getNumPatternEntries(),
         initContextIDs);
 
-    DeclContext *owningDC = nullptr;
-    if (binding->getDeclContext()->isTypeContext())
-      owningDC = binding->getDeclContext();
-
     for (auto entryIdx : range(binding->getNumPatternEntries())) {
       writePattern(binding->getPattern(entryIdx));
       // Ignore initializer; external clients don't need to know about it.
@@ -3620,6 +3626,7 @@ public:
                                const_cast<ProtocolDecl *>(proto)
                                  ->requiresClass(),
                                proto->isObjC(),
+                               proto->existentialRequiresAny(),
                                rawAccessLevel, numInherited,
                                inheritedAndDependencyTypes);
 
@@ -4696,6 +4703,12 @@ public:
         protocols);
   }
 
+  void
+  visitExistentialType(const ExistentialType *existential) {
+    using namespace decls_block;
+    serializeSimpleWrapper<ExistentialTypeLayout>(existential->getConstraintType());
+  }
+
   void visitReferenceStorageType(const ReferenceStorageType *refTy) {
     using namespace decls_block;
     unsigned abbrCode = S.DeclTypeAbbrCodes[ReferenceStorageTypeLayout::Code];
@@ -4872,6 +4885,7 @@ void Serializer::writeAllDeclsAndTypes() {
   registerDeclTypeAbbr<NestedArchetypeTypeLayout>();
   registerDeclTypeAbbr<SequenceArchetypeTypeLayout>();
   registerDeclTypeAbbr<ProtocolCompositionTypeLayout>();
+  registerDeclTypeAbbr<ExistentialTypeLayout>();
   registerDeclTypeAbbr<BoundGenericTypeLayout>();
   registerDeclTypeAbbr<GenericFunctionTypeLayout>();
   registerDeclTypeAbbr<SILBlockStorageTypeLayout>();

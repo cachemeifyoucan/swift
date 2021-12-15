@@ -563,6 +563,11 @@ def create_argument_parser():
            help='A space separated list of targets to cross-compile host '
                 'Swift tools for. Can be used multiple times.')
 
+    option('--cross-compile-deps-path', store_path,
+           help='The path to a directory that contains prebuilt cross-compiled '
+                'library dependencies of the corelibs and other Swift repos, '
+                'such as the libcurl dependency of FoundationNetworking')
+
     option('--stdlib-deployment-targets', store,
            type=argparse.ShellSplitType(),
            default=None,
@@ -588,6 +593,9 @@ def create_argument_parser():
            help='Semicolon-separated list of architectures to configure Swift '
                 'module-only targets on Darwin platforms. These targets are '
                 'in addition to the full library targets.')
+
+    option('--swift-freestanding-is-darwin', toggle_true,
+           help='True if the freestanding platform is a Darwin one.')
 
     # -------------------------------------------------------------------------
     in_group('Options to select projects')

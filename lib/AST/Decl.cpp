@@ -20,6 +20,7 @@
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/ASTWalker.h"
 #include "swift/AST/ASTMangler.h"
+#include "swift/AST/CaptureInfo.h"
 #include "swift/AST/DiagnosticEngine.h"
 #include "swift/AST/DiagnosticsSema.h"
 #include "swift/AST/ExistentialLayout.h"
@@ -1957,7 +1958,11 @@ static bool isPolymorphic(const AbstractStorageDecl *storage) {
     return true;
 
   if (auto *classDecl = dyn_cast<ClassDecl>(storage->getDeclContext())) {
-    if (storage->isFinal() || classDecl->isFinal())
+    // Accesses to members of foreign reference types should be made directly
+    // to storage as these are references to clang records which are not allowed
+    // to have dynamic dispatch.
+    if (storage->isFinal() || classDecl->isFinal() ||
+        classDecl->isForeignReferenceType())
       return false;
 
     return true;
@@ -4327,8 +4332,8 @@ void NominalTypeDecl::synthesizeSemanticMembersIfNeeded(DeclName member) {
       if (baseName == DeclBaseName::createConstructor()) {
         if ((member.isSimpleName() || argumentNames.front() == Context.Id_from)) {
           action.emplace(ImplicitMemberAction::ResolveDecodable);
-        } else if (argumentNames.front() == Context.Id_transport) {
-          action.emplace(ImplicitMemberAction::ResolveDistributedActorTransport);
+        } else if (argumentNames.front() == Context.Id_system) {
+          action.emplace(ImplicitMemberAction::ResolveDistributedActorSystem);
         }
       } else if (!baseName.isSpecial() &&
            baseName.getIdentifier() == Context.Id_encode &&
@@ -4735,6 +4740,10 @@ bool ClassDecl::walkSuperclasses(
   }
 
   return false;
+}
+
+bool ClassDecl::isForeignReferenceType() {
+  return getClangDecl() && isa<clang::RecordDecl>(getClangDecl());
 }
 
 EnumCaseDecl *EnumCaseDecl::create(SourceLoc CaseLoc,
@@ -5256,6 +5265,11 @@ bool ProtocolDecl::isAvailableInExistential(const ValueDecl *decl) const {
   }
 
   return true;
+}
+
+bool ProtocolDecl::existentialRequiresAny() const {
+  return evaluateOrDefault(getASTContext().evaluator,
+    ExistentialRequiresAnyRequest{const_cast<ProtocolDecl *>(this)}, true);
 }
 
 StringRef ProtocolDecl::getObjCRuntimeName(
@@ -7386,6 +7400,18 @@ AbstractFunctionDecl::getDistributedActorRemoteFuncDecl() const {
       nullptr);
 }
 
+ValueDecl*
+NominalTypeDecl::getDistributedActorIDProperty() const {
+  if (!this->isDistributedActor())
+    return nullptr;
+
+  auto mutableThis = const_cast<NominalTypeDecl *>(this);
+  return evaluateOrDefault(
+      getASTContext().evaluator,
+      GetDistributedActorIDPropertyRequest{mutableThis},
+      nullptr);
+}
+
 BraceStmt *AbstractFunctionDecl::getBody(bool canSynthesize) const {
   if ((getBodyKind() == BodyKind::Synthesize ||
        getBodyKind() == BodyKind::Unparsed) &&
@@ -8609,6 +8635,41 @@ void ClassDecl::setSuperclass(Type superclass) {
     true);
 }
 
+bool VarDecl::isSelfParamCaptureIsolated() const {
+  assert(isSelfParamCapture());
+
+  // Find the "self" parameter that we captured and determine whether
+  // it is potentially isolated.
+  for (auto dc = getDeclContext(); dc; dc = dc->getParent()) {
+    if (auto func = dyn_cast<AbstractFunctionDecl>(dc)) {
+      if (auto selfDecl = func->getImplicitSelfDecl()) {
+        return selfDecl->isIsolated();
+      }
+
+      if (auto capture = func->getCaptureInfo().getIsolatedParamCapture())
+        return capture->isSelfParameter() || capture->isSelfParamCapture();
+    }
+
+    if (auto closure = dyn_cast<AbstractClosureExpr>(dc)) {
+      switch (auto isolation = closure->getActorIsolation()) {
+      case ClosureActorIsolation::Independent:
+      case ClosureActorIsolation::GlobalActor:
+        return false;
+
+      case ClosureActorIsolation::ActorInstance:
+        auto isolatedVar = isolation.getActorInstance();
+        return isolatedVar->isSelfParameter() ||
+            isolatedVar-isSelfParamCapture();
+      }
+    }
+
+    if (dc->isModuleScopeContext() || dc->isTypeContext())
+      break;
+  }
+
+  return false;
+}
+
 ActorIsolation swift::getActorIsolation(ValueDecl *value) {
   auto &ctx = value->getASTContext();
   return evaluateOrDefault(
@@ -8638,7 +8699,7 @@ ActorIsolation swift::getActorIsolationOfContext(DeclContext *dc) {
 
     case ClosureActorIsolation::ActorInstance: {
       auto selfDecl = isolation.getActorInstance();
-      auto actorClass = selfDecl->getType()->getRValueType()
+      auto actorClass = selfDecl->getType()->getReferenceStorageReferent()
           ->getClassOrBoundGenericClass();
       // FIXME: Doesn't work properly with generics
       assert(actorClass && "Bad closure actor isolation?");

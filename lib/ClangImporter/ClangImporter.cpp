@@ -2226,8 +2226,8 @@ ClangImporter::Implementation::Implementation(
       EnableClangSPI(ctx.ClangImporterOpts.EnableClangSPI),
       IsReadingBridgingPCH(false),
       CurrentVersion(ImportNameVersion::fromOptions(ctx.LangOpts)),
-      BuffersForDiagnostics(ctx.SourceMgr),
       BridgingHeaderLookupTable(new SwiftLookupTable(nullptr)),
+      BuffersForDiagnostics(ctx.SourceMgr),
       platformAvailability(ctx.LangOpts), nameImporter(),
       DisableSourceImport(ctx.ClangImporterOpts.DisableSourceImport),
       DWARFImporter(dwarfImporterDelegate) {}
@@ -2546,10 +2546,6 @@ static bool isVisibleFromModule(const ClangModuleUnit *ModuleFilter,
   ASTContext &Ctx = ContainingUnit->getASTContext();
   auto *Importer = static_cast<ClangImporter *>(Ctx.getClangModuleLoader());
   auto ClangNode = Importer->getEffectiveClangNode(VD);
-
-  // Decls in the __ObjC bridging header is always visible.
-  if (VD->getModuleContext() == Importer->getImportedHeaderModule())
-    return true;
 
   // Macros can be "redeclared" by putting an equivalent definition in two
   // different modules. (We don't actually check the equivalence.)
@@ -4141,7 +4137,7 @@ TinyPtrVector<ValueDecl *> CXXNamespaceMemberLookup::evaluate(
 
 TinyPtrVector<ValueDecl *> ClangRecordMemberLookup::evaluate(
     Evaluator &evaluator, ClangRecordMemberLookupDescriptor desc) const {
-  StructDecl *recordDecl = desc.recordDecl;
+  NominalTypeDecl *recordDecl = desc.recordDecl;
   DeclName name = desc.name;
 
   auto &ctx = recordDecl->getASTContext();

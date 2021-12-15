@@ -245,14 +245,18 @@ SwiftEditorDocumentFileMap::getByUnresolvedName(StringRef FilePath) {
 }
 
 SwiftEditorDocumentRef
-SwiftEditorDocumentFileMap::findByPath(StringRef FilePath) {
+SwiftEditorDocumentFileMap::findByPath(StringRef FilePath, bool IsRealpath) {
   SwiftEditorDocumentRef EditorDoc;
 
-  std::string ResolvedPath = SwiftLangSupport::resolvePathSymlinks(FilePath);
+  std::string Scratch;
+  if (!IsRealpath) {
+    Scratch = SwiftLangSupport::resolvePathSymlinks(FilePath);
+    FilePath = Scratch;
+  }
   Queue.dispatchSync([&]{
     for (auto &Entry : Docs) {
       if (Entry.getKey() == FilePath ||
-          Entry.getValue().ResolvedPath == ResolvedPath) {
+          Entry.getValue().ResolvedPath == FilePath) {
         EditorDoc = Entry.getValue().DocRef;
         break;
       }
@@ -650,7 +654,7 @@ public:
   void setCompilerArgs(ArrayRef<const char *> Args) {
     if (auto ASTMgr = this->ASTMgr.lock()) {
       InvokRef =
-          ASTMgr->getInvocation(Args, Filename, CompilerArgsError);
+          ASTMgr->getTypecheckInvocation(Args, Filename, CompilerArgsError);
     }
   }
 
@@ -2011,8 +2015,8 @@ void SwiftEditorDocument::resetSyntaxInfo(ImmutableTextSnapshotRef Snapshot,
     Args.push_back("-");
     std::string Error;
     // Ignore possible error(s)
-    Lang.getASTManager()->
-      initCompilerInvocation(CompInv, Args, StringRef(), Error);
+    Lang.getASTManager()->initCompilerInvocation(
+        CompInv, Args, FrontendOptions::ActionType::Parse, StringRef(), Error);
   }
   CompInv.getLangOptions().BuildSyntaxTree = BuildSyntaxTree;
   CompInv.setMainFileSyntaxParsingCache(SyntaxCache);

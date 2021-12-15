@@ -21,6 +21,7 @@
 #include "RequirementMachine.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/Decl.h"
+#include "swift/AST/DiagnosticsSema.h"
 #include "swift/AST/GenericSignature.h"
 #include "swift/AST/LazyResolver.h"
 #include "swift/AST/Requirement.h"
@@ -78,7 +79,9 @@ void ConnectedComponent::buildRequirements(Type subjectType,
                         subjectType, constraintType);
       subjectType = constraintType;
     }
-  } else {
+  } else if (!ConcreteType->hasError()) {
+    // For compatibility with the old GenericSignatureBuilder, drop requirements
+    // containing ErrorTypes.
     reqs.emplace_back(RequirementKind::SameType,
                       subjectType, ConcreteType);
 
@@ -119,14 +122,20 @@ RequirementMachine::buildRequirementsFromRules(
                           prop->getLayoutConstraint());
         return;
 
-      case Symbol::Kind::Superclass:
+      case Symbol::Kind::Superclass: {
+        // For compatibility with the old GenericSignatureBuilder, drop requirements
+        // containing ErrorTypes.
+        auto superclassType = Context.getTypeFromSubstitutionSchema(
+                                prop->getSuperclass(),
+                                prop->getSubstitutions(),
+                                genericParams, MutableTerm());
+        if (superclassType->hasError())
+          return;
+
         reqs.emplace_back(RequirementKind::Superclass,
-                          subjectType,
-                          Context.getTypeFromSubstitutionSchema(
-                              prop->getSuperclass(),
-                              prop->getSubstitutions(),
-                              genericParams, MutableTerm()));
+                          subjectType, superclassType);
         return;
+      }
 
       case Symbol::Kind::ConcreteType: {
         auto concreteType = Context.getTypeFromSubstitutionSchema(
@@ -139,6 +148,11 @@ RequirementMachine::buildRequirementsFromRules(
         component.ConcreteType = concreteType;
         return;
       }
+
+      case Symbol::Kind::ConcreteConformance:
+        // "Concrete conformance requirements" are not recorded in the generic
+        // signature.
+        return;
 
       case Symbol::Kind::Name:
       case Symbol::Kind::AssociatedType:
@@ -236,8 +250,33 @@ RequirementSignatureRequestRQM::evaluate(Evaluator &evaluator,
 
   // We build requirement signatures for all protocols in a strongly connected
   // component at the same time.
-  auto *machine = ctx.getRewriteContext().getRequirementMachine(proto);
-  auto requirements = machine->computeMinimalProtocolRequirements();
+  auto component = ctx.getRewriteContext().getProtocolComponent(proto);
+
+  // Heap-allocate the requirement machine to save stack space.
+  std::unique_ptr<RequirementMachine> machine(new RequirementMachine(
+      ctx.getRewriteContext()));
+
+  auto status = machine->initWithProtocols(component);
+  if (status != CompletionResult::Success) {
+    // All we can do at this point is diagnose and give each protocol an empty
+    // requirement signature.
+    for (const auto *otherProto : component) {
+      ctx.Diags.diagnose(otherProto->getLoc(),
+                         diag::requirement_machine_completion_failed,
+                         /*protocol=*/1,
+                         status == CompletionResult::MaxIterations ? 0 : 1);
+
+      if (otherProto != proto) {
+        ctx.evaluator.cacheOutput(
+          RequirementSignatureRequestRQM{const_cast<ProtocolDecl *>(otherProto)},
+          ArrayRef<Requirement>());
+      }
+    }
+
+    return ArrayRef<Requirement>();
+  }
+
+  auto minimalRequirements = machine->computeMinimalProtocolRequirements();
 
   bool debug = machine->getDebugOptions().contains(DebugFlags::Minimization);
 
@@ -245,7 +284,7 @@ RequirementSignatureRequestRQM::evaluate(Evaluator &evaluator,
   // was kicked off with.
   ArrayRef<Requirement> result;
 
-  for (const auto &pair : requirements) {
+  for (const auto &pair : minimalRequirements) {
     auto *otherProto = pair.first;
     const auto &reqs = pair.second;
 
@@ -354,10 +393,9 @@ AbstractGenericSignatureRequestRQM::evaluate(
   auto minimalRequirements =
     machine->computeMinimalGenericSignatureRequirements();
 
-  // FIXME: Implement this
-  bool hadError = false;
-
   auto result = GenericSignature::get(genericParams, minimalRequirements);
+  bool hadError = machine->hadError();
+
   return GenericSignatureWithError(result, hadError);
 }
 
@@ -389,7 +427,10 @@ InferredGenericSignatureRequestRQM::evaluate(
     return false;
   };
 
+  SourceLoc loc;
   if (genericParamList) {
+    loc = genericParamList->getLAngleLoc();
+
     // Extensions never have a parent signature.
     assert(genericParamList->getOuterParameters() == nullptr || !parentSig);
 
@@ -429,6 +470,9 @@ InferredGenericSignatureRequestRQM::evaluate(
   }
 
   if (whereClause) {
+    if (loc.isInvalid())
+      loc = whereClause.getLoc();
+
     std::move(whereClause).visitRequirements(
         TypeResolutionStage::Structural,
         visitRequirement);
@@ -453,15 +497,22 @@ InferredGenericSignatureRequestRQM::evaluate(
   std::unique_ptr<RequirementMachine> machine(new RequirementMachine(
       ctx.getRewriteContext()));
 
-  machine->initWithWrittenRequirements(genericParams, requirements);
+  auto status = machine->initWithWrittenRequirements(genericParams, requirements);
+  if (status != CompletionResult::Success) {
+    ctx.Diags.diagnose(loc,
+                       diag::requirement_machine_completion_failed,
+                       /*protocol=*/0,
+                       status == CompletionResult::MaxIterations ? 0 : 1);
+
+    auto result = GenericSignature::get(genericParams, {});
+    return GenericSignatureWithError(result, /*hadError=*/true);
+  }
 
   auto minimalRequirements =
     machine->computeMinimalGenericSignatureRequirements();
 
-  // FIXME: Implement this
-  bool hadError = false;
-
   auto result = GenericSignature::get(genericParams, minimalRequirements);
+  bool hadError = machine->hadError();
 
   // FIXME: Handle allowConcreteGenericParams
 

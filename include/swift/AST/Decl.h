@@ -28,6 +28,7 @@
 #include "swift/AST/GenericParamKey.h"
 #include "swift/AST/IfConfigClause.h"
 #include "swift/AST/LayoutConstraint.h"
+#include "swift/AST/ReferenceCounting.h"
 #include "swift/AST/StorageImpl.h"
 #include "swift/AST/TypeAlignments.h"
 #include "swift/AST/TypeWalker.h"
@@ -37,10 +38,10 @@
 #include "swift/Basic/Compiler.h"
 #include "swift/Basic/Debug.h"
 #include "swift/Basic/InlineBitfield.h"
+#include "swift/Basic/Located.h"
 #include "swift/Basic/NullablePtr.h"
 #include "swift/Basic/OptionalEnum.h"
 #include "swift/Basic/Range.h"
-#include "swift/Basic/Located.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/TrailingObjects.h"
 #include <type_traits>
@@ -519,7 +520,7 @@ protected:
     IsComputingSemanticMembers : 1
   );
 
-  SWIFT_INLINE_BITFIELD_FULL(ProtocolDecl, NominalTypeDecl, 1+1+1+1+1+1+1+1+1+8+16,
+  SWIFT_INLINE_BITFIELD_FULL(ProtocolDecl, NominalTypeDecl, 1+1+1+1+1+1+1+1+1+1+1+8+16,
     /// Whether the \c RequiresClass bit is valid.
     RequiresClassValid : 1,
 
@@ -531,6 +532,12 @@ protected:
 
     /// Whether the existential of this protocol conforms to itself.
     ExistentialConformsToSelf : 1,
+
+    /// Whether the \c ExistentialRequiresAny bit is valid.
+    ExistentialRequiresAnyValid : 1,
+
+    /// Whether the existential of this protocol must be spelled with \c any.
+    ExistentialRequiresAny : 1,
 
     /// True if the protocol has requirements that cannot be satisfied (e.g.
     /// because they could not be imported from Objective-C).
@@ -3302,6 +3309,9 @@ public:
   /// If the passed in function is not distributed this function returns null.
   AbstractFunctionDecl* lookupDirectRemoteFunc(AbstractFunctionDecl *func);
 
+  /// Find, or potentially synthesize, the implicit 'id' property of this actor.
+  ValueDecl *getDistributedActorIDProperty() const;
+
   /// Collect the set of protocols to which this type should implicitly
   /// conform, such as AnyObject (for classes).
   void getImplicitProtocols(SmallVectorImpl<ProtocolDecl *> &protocols);
@@ -3906,7 +3916,8 @@ public:
   ///
   /// \see getForeignClassKind
   bool isForeign() const {
-    return getForeignClassKind() != ForeignKind::Normal;
+    return getForeignClassKind() != ForeignKind::Normal ||
+      const_cast<ClassDecl *>(this)->isForeignReferenceType();
   }
 
   /// Whether the class is (known to be) a default actor.
@@ -3941,9 +3952,22 @@ public:
   bool isNativeNSObjectSubclass() const;
 
   /// Whether the class uses the ObjC object model (reference counting,
-  /// allocation, etc.) instead of the Swift model.
-  bool usesObjCObjectModel() const {
-    return checkAncestry(AncestryFlags::ObjCObjectModel);
+  /// allocation, etc.), the Swift model, or has no reference counting at all.
+  ReferenceCounting getObjectModel() {
+    if (isForeignReferenceType())
+      return ReferenceCounting::None;
+
+    if (checkAncestry(AncestryFlags::ObjCObjectModel))
+      return ReferenceCounting::ObjC;
+
+    return ReferenceCounting::Native;
+  }
+
+  LayoutConstraintKind getLayoutConstraintKind() {
+    if (getObjectModel() == ReferenceCounting::ObjC)
+      return LayoutConstraintKind::Class;
+
+    return LayoutConstraintKind::NativeClass;
   }
 
   /// Returns true if the class has designated initializers that are not listed
@@ -4065,6 +4089,11 @@ public:
   bool hasKnownSwiftImplementation() const {
     return !hasClangNode();
   }
+
+  /// Used to determine if this class decl is a foriegn reference type. I.e., a
+  /// non-reference-counted swift reference type that was imported from a C++
+  /// record.
+  bool isForeignReferenceType();
 };
 
 /// A convenience wrapper around the \c SelfReferencePosition::Kind enum.
@@ -4224,6 +4253,21 @@ class ProtocolDecl final : public NominalTypeDecl {
     Bits.ProtocolDecl.ExistentialConformsToSelf = result;
   }
 
+  /// Returns the cached result of \c existentialRequiresAny or \c None if it
+  /// hasn't yet been computed.
+  Optional<bool> getCachedExistentialRequiresAny() {
+    if (Bits.ProtocolDecl.ExistentialRequiresAnyValid)
+      return Bits.ProtocolDecl.ExistentialRequiresAny;
+
+    return None;
+  }
+
+  /// Caches the result of \c existentialRequiresAny
+  void setCachedExistentialRequiresAny(bool requiresAny) {
+    Bits.ProtocolDecl.ExistentialRequiresAnyValid = true;
+    Bits.ProtocolDecl.ExistentialRequiresAny = requiresAny;
+  }
+
   bool hasLazyRequirementSignature() const {
     return Bits.ProtocolDecl.HasLazyRequirementSignature;
   }
@@ -4237,6 +4281,7 @@ class ProtocolDecl final : public NominalTypeDecl {
   friend class RequirementSignatureRequestRQM;
   friend class ProtocolRequiresClassRequest;
   friend class ExistentialConformsToSelfRequest;
+  friend class ExistentialRequiresAnyRequest;
   friend class InheritedProtocolsRequest;
   
 public:
@@ -4324,6 +4369,11 @@ public:
   /// the member does not contain any associated types, and does not
   /// contain 'Self' in 'parameter' or 'other' position.
   bool isAvailableInExistential(const ValueDecl *decl) const;
+
+  /// Determine whether an existential type must be explicitly prefixed
+  /// with \c any. \c any is required if any of the members contain
+  /// an associated type, or if \c Self appears in non-covariant position.
+  bool existentialRequiresAny() const;
 
   /// Returns a list of protocol requirements that must be assessed to
   /// determine a concrete's conformance effect polymorphism kind.
@@ -5134,6 +5184,9 @@ public:
   void setIsSelfParamCapture(bool IsSelfParamCapture = true) {
       Bits.VarDecl.IsSelfParamCapture = IsSelfParamCapture;
   }
+
+  /// Check whether this capture of the self param is actor-isolated.
+  bool isSelfParamCaptureIsolated() const;
 
   /// Determines if this var has an initializer expression that should be
   /// exposed to clients.

@@ -71,14 +71,12 @@ using namespace swift;
 /// file.
 static void checkInheritanceClause(
     llvm::PointerUnion<const TypeDecl *, const ExtensionDecl *> declUnion) {
-  const DeclContext *DC;
   ArrayRef<InheritedEntry> inheritedClause;
   const ExtensionDecl *ext = nullptr;
   const TypeDecl *typeDecl = nullptr;
   const Decl *decl;
   if ((ext = declUnion.dyn_cast<const ExtensionDecl *>())) {
     decl = ext;
-    DC = ext;
 
     inheritedClause = ext->getInherited();
 
@@ -95,12 +93,6 @@ static void checkInheritanceClause(
   } else {
     typeDecl = declUnion.get<const TypeDecl *>();
     decl = typeDecl;
-    if (auto nominal = dyn_cast<NominalTypeDecl>(typeDecl)) {
-      DC = nominal;
-    } else {
-      DC = typeDecl->getDeclContext();
-    }
-
     inheritedClause = typeDecl->getInherited();
   }
 
@@ -1696,6 +1688,8 @@ public:
 
     DeclVisitor<DeclChecker>::visit(decl);
 
+    TypeChecker::checkExistentialTypes(decl);
+
     if (auto VD = dyn_cast<ValueDecl>(decl)) {
       auto &Context = getASTContext();
       TypeChecker::checkForForbiddenPrefix(Context, VD->getBaseName());
@@ -2618,10 +2612,12 @@ public:
       if (!SF || SF->Kind != SourceFileKind::Interface)
         TypeChecker::inferDefaultWitnesses(PD);
 
+    // Explicity compute the requirement signature to detect errors.
+    auto reqSig = PD->getRequirementSignature();
+
     if (PD->getASTContext().TypeCheckerOpts.DebugGenericSignatures) {
       auto requirementsSig =
-        GenericSignature::get({PD->getProtocolSelfType()},
-                              PD->getRequirementSignature());
+        GenericSignature::get({PD->getProtocolSelfType()}, reqSig);
 
       llvm::errs() << "\n";
       llvm::errs() << "Protocol requirement signature:\n";
@@ -2639,8 +2635,14 @@ public:
       llvm::errs() << "\n";
     }
 
-    // Explicity compute the requirement signature to detect errors.
-    (void) PD->getRequirementSignature();
+
+#ifndef NDEBUG
+    // In asserts builds, also verify some invariants of the requirement
+    // signature.
+    PD->getGenericSignature().verify(reqSig);
+#endif
+
+    (void) reqSig;
 
     checkExplicitAvailability(PD);
   }
