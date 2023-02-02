@@ -122,6 +122,15 @@ public:
   /// The module for which we should verify all of the generic signatures.
   std::string VerifyGenericSignaturesInModule;
 
+  /// Use CAS.
+  bool EnableCAS = false;
+
+  /// The CAS ObjectStore Path.
+  std::string CASObjectStorePath;
+
+  /// The CAS ActionCache Path.
+  std::string CASActionCachePath;
+
   /// Number of retry opening an input file if the previous opening returns
   /// bad file descriptor error.
   unsigned BadFileDescriptorRetryCount = 0;

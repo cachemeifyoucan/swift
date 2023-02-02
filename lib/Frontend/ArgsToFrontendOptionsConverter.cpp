@@ -346,6 +346,10 @@ bool ArgsToFrontendOptionsConverter::convert(
   }
   Opts.emptyABIDescriptor = Args.hasArg(OPT_empty_abi_descriptor);
   Opts.DeterministicCheck = Args.hasArg(OPT_enable_swift_deterministic_check);
+
+  Opts.EnableCAS = Args.hasArg(OPT_enable_cas);
+  Opts.CASObjectStorePath = Args.getLastArgValue(OPT_object_store_path);
+  Opts.CASActionCachePath = Args.getLastArgValue(OPT_action_cache_path);
   return false;
 }
 

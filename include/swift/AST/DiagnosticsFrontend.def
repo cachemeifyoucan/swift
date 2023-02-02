@@ -485,6 +485,9 @@ ERROR(error_output_missing,none,
 REMARK(matching_output_produced,none,
       "produced matching output file '%0' for deterministic check: hash '%1'", (StringRef, StringRef))
 
+// CAS related diagnostics
+ERROR(error_create_cas, none, "failed to create CAS '%0' (%1)", (StringRef, StringRef))
+
 // Dependency Verifier Diagnostics
 ERROR(missing_member_dependency,none,
       "expected "

@@ -41,6 +41,8 @@
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/CAS/ActionCache.h"
+#include "llvm/CAS/ObjectStore.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -396,6 +398,32 @@ void CompilerInstance::setupDependencyTrackerIfNeeded() {
     DepTracker->addDependency(path, /*isSystem=*/false);
 }
 
+bool CompilerInstance::setupCASIfNeeded() {
+  const auto &Opts = getInvocation().getFrontendOptions();
+  if (!Opts.EnableCAS)
+    return false;
+
+  std::string Path = Opts.CASObjectStorePath.empty()
+                         ? llvm::cas::getDefaultOnDiskCASPath()
+                         : Opts.CASObjectStorePath;
+  if (auto E = llvm::cas::createOnDiskCAS(Path).moveInto(CAS)) {
+    Diagnostics.diagnose(SourceLoc(), diag::error_create_cas, Path,
+                         toString(std::move(E)));
+    return true;
+  }
+
+  Path = Opts.CASActionCachePath.empty()
+             ? llvm::cas::getDefaultOnDiskActionCachePath()
+             : Opts.CASActionCachePath;
+  if (auto E = llvm::cas::createOnDiskActionCache(Path).moveInto(Cache)) {
+    Diagnostics.diagnose(SourceLoc(), diag::error_create_cas, Path,
+                         toString(std::move(E)));
+    return true;
+  }
+
+  return false;
+}
+
 void CompilerInstance::setupOutputBackend() {
   // Skip if output backend is not setup, default to OnDiskOutputBackend.
   if (TheOutputBackend)
@@ -418,6 +446,11 @@ void CompilerInstance::setupOutputBackend() {
 bool CompilerInstance::setup(const CompilerInvocation &Invoke,
                              std::string &Error) {
   Invocation = Invoke;
+
+  if (setupCASIfNeeded()) {
+    Error = "Setting up CAS failed";
+    return true;
+  }
 
   setupDependencyTrackerIfNeeded();
   setupOutputBackend();
