@@ -1189,6 +1189,8 @@ def object_store_path: Separate<["-"], "object-store-path">,
   HelpText<"Path to CAS ObjectStore">, MetaVarName<"<path>">;
 def action_cache_path: Separate<["-"], "action-cache-path">,
   HelpText<"Path to CAS ActionCache">, MetaVarName<"<path>">;
+def cas_fs: Separate<["-"], "cas-fs">,
+  HelpText<"Root CASID for CAS FileSystem">, MetaVarName<"<cas-id>">;
 
 def experimental_spi_only_imports :
   Flag<["-"], "experimental-spi-only-imports">,

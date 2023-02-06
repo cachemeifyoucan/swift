@@ -42,6 +42,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/CAS/ActionCache.h"
+#include "llvm/CAS/CASFileSystem.h"
 #include "llvm/CAS/ObjectStore.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
@@ -497,6 +498,26 @@ bool CompilerInstance::setup(const CompilerInvocation &Invoke,
 }
 
 bool CompilerInstance::setUpVirtualFileSystemOverlays() {
+  if (Invocation.getFrontendOptions().EnableCAS &&
+      !Invocation.getFrontendOptions().CASFSRootID.empty()) {
+    // Set up CASFS as BaseFS.
+    auto RootID = CAS->parseID(Invocation.getFrontendOptions().CASFSRootID);
+    if (!RootID) {
+      Diagnostics.diagnose(SourceLoc(), diag::error_invalid_cas_id,
+                           Invocation.getFrontendOptions().CASFSRootID,
+                           toString(RootID.takeError()));
+      return true;
+    }
+    auto FS = llvm::cas::createCASFileSystem(*CAS, *RootID);
+    if (!FS) {
+      Diagnostics.diagnose(SourceLoc(), diag::error_invalid_cas_id,
+                           Invocation.getFrontendOptions().CASFSRootID,
+                           toString(FS.takeError()));
+      return true;
+    }
+    setFileSystem(std::move(*FS));
+  }
+
   auto ExpectedOverlay =
       Invocation.getSearchPathOptions().makeOverlayFileSystem(
           SourceMgr.getFileSystem());

@@ -131,6 +131,9 @@ public:
   /// The CAS ActionCache Path.
   std::string CASActionCachePath;
 
+  /// CASFS Root.
+  std::string CASFSRootID;
+
   /// Number of retry opening an input file if the previous opening returns
   /// bad file descriptor error.
   unsigned BadFileDescriptorRetryCount = 0;

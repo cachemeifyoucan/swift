@@ -350,6 +350,8 @@ bool ArgsToFrontendOptionsConverter::convert(
   Opts.EnableCAS = Args.hasArg(OPT_enable_cas);
   Opts.CASObjectStorePath = Args.getLastArgValue(OPT_object_store_path);
   Opts.CASActionCachePath = Args.getLastArgValue(OPT_action_cache_path);
+  Opts.CASFSRootID = Args.getLastArgValue(OPT_cas_fs);
+
   return false;
 }
 
