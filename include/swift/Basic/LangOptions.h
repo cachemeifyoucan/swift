@@ -801,6 +801,10 @@ namespace swift {
     /// import, but it can affect Clang's IR generation of static functions.
     std::string Optimization;
 
+    /// clang CASOptions.
+    std::string ObjectStorePath;
+    std::string ActionCachePath;
+
     /// Disable validating the persistent PCH.
     bool PCHDisableValidation = false;
 

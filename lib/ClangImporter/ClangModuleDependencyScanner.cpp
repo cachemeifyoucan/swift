@@ -183,6 +183,16 @@ void ClangImporter::recordModuleDependencies(
                              ? clangModuleDep.CASFileSystemRootID->toString()
                              : "";
 
+    if (!RootID.empty()) {
+      swiftArgs.push_back("-enable-cas");
+      swiftArgs.push_back("-object-store-path");
+      swiftArgs.push_back(ctx.ClangImporterOpts.ObjectStorePath);
+      swiftArgs.push_back("-action-cache-path");
+      swiftArgs.push_back(ctx.ClangImporterOpts.ActionCachePath);
+      swiftArgs.push_back("-cas-fs");
+      swiftArgs.push_back(RootID);
+    }
+
     // Module-level dependencies.
     llvm::StringSet<> alreadyAddedModules;
     auto dependencies = ModuleDependencyInfo::forClangModule(
