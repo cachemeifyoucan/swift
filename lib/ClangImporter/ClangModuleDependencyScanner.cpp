@@ -178,6 +178,11 @@ void ClangImporter::recordModuleDependencies(
     // Add args reported by the scanner.
     llvm::for_each(clangModuleDep.BuildArguments, addClangArg);
 
+    // CASFileSystemRootID.
+    std::string RootID = clangModuleDep.CASFileSystemRootID
+                             ? clangModuleDep.CASFileSystemRootID->toString()
+                             : "";
+
     // Module-level dependencies.
     llvm::StringSet<> alreadyAddedModules;
     auto dependencies = ModuleDependencyInfo::forClangModule(
@@ -186,7 +191,8 @@ void ClangImporter::recordModuleDependencies(
         clangModuleDep.ID.ContextHash,
         swiftArgs,
         fileDeps,
-        capturedPCMArgs);
+        capturedPCMArgs,
+        RootID);
     for (const auto &moduleName : clangModuleDep.ClangModuleDeps) {
       dependencies.addModuleImport(moduleName.ModuleName, &alreadyAddedModules);
       // It is safe to assume that all dependencies of a Clang module are Clang modules.

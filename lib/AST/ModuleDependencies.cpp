@@ -15,8 +15,11 @@
 //===----------------------------------------------------------------------===//
 #include "swift/AST/ModuleDependencies.h"
 #include "swift/AST/Decl.h"
+#include "swift/AST/DiagnosticsFrontend.h"
 #include "swift/AST/SourceFile.h"
 #include "swift/Frontend/Frontend.h"
+#include "llvm/CAS/CASProvidingFileSystem.h"
+#include "llvm/CAS/CachingOnDiskFileSystem.h"
 using namespace swift;
 
 ModuleDependencyInfoStorageBase::~ModuleDependencyInfoStorageBase() {}
@@ -251,6 +254,34 @@ void SwiftDependencyScanningService::overlaySharedFilesystemCacheForCompilation(
  Instance.getSourceMgr().setFileSystem(depFS);
 }
 
+void SwiftDependencyScanningService::setupCachingDependencyScanningService(
+    CompilerInstance &Instance) {
+  if (!Instance.getInvocation().getFrontendOptions().EnableCAS)
+    return;
+
+  auto CachingFS = llvm::cas::createCachingOnDiskFileSystem(Instance.getObjectStore());
+  if (!CachingFS) {
+    Instance.getDiags().diagnose(SourceLoc(), diag::error_create_cas,
+                                 "CachingOnDiskFS",
+                                 toString(CachingFS.takeError()));
+    return;
+  }
+  CacheFS = std::move(*CachingFS);
+
+  clang::CASOptions CASOpts;
+  CASOpts.CASPath =
+      Instance.getInvocation().getFrontendOptions().CASObjectStorePath;
+  CASOpts.CachePath =
+      Instance.getInvocation().getFrontendOptions().CASActionCachePath;
+  CASOpts.ensurePersistentCAS();
+
+  ClangScanningService.emplace(
+          clang::tooling::dependencies::ScanningMode::DependencyDirectivesScan,
+          clang::tooling::dependencies::ScanningOutputFormat::FullTree,
+          CASOpts, Instance.getSharedCacheInstance(), CacheFS,
+          /* ReuseFileManager */ false, /* OptimizeArgs */ false);
+}
+
 SwiftDependencyScanningService::ContextSpecificGlobalCacheState *
 SwiftDependencyScanningService::getCacheForScanningContextHash(StringRef scanningContextHash) const {
   auto contextSpecificCache = ContextSpecificCacheMap.find(scanningContextHash);
@@ -362,12 +393,12 @@ ModuleDependenciesCache::getDependencyReferencesMap(
 
 ModuleDependenciesCache::ModuleDependenciesCache(
     SwiftDependencyScanningService &globalScanningService,
-    std::string mainScanModuleName,
-    std::string scannerContextHash)
+    std::string mainScanModuleName, std::string scannerContextHash)
     : globalScanningService(globalScanningService),
       mainScanModuleName(mainScanModuleName),
       scannerContextHash(scannerContextHash),
-      clangScanningTool(globalScanningService.ClangScanningService) {
+      clangScanningTool(*globalScanningService.ClangScanningService,
+                        globalScanningService.CacheFS) {
   globalScanningService.configureForContextHash(scannerContextHash);
   for (auto kind = ModuleDependencyKind::FirstKind;
        kind != ModuleDependencyKind::LastKind; ++kind) {
@@ -376,8 +407,7 @@ ModuleDependenciesCache::ModuleDependenciesCache(
   }
 }
 
-Optional<const ModuleDependencyInfo*>
-ModuleDependenciesCache::findDependency(
+Optional<const ModuleDependencyInfo *> ModuleDependenciesCache::findDependency(
     StringRef moduleName, Optional<ModuleDependencyKind> kind) const {
   auto optionalDep = globalScanningService.findDependency(moduleName, kind,
                                                           scannerContextHash);

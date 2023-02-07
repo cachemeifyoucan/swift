@@ -196,6 +196,9 @@ swiftscan_clang_detail_get_command_line(swiftscan_module_details_t details);
 SWIFTSCAN_PUBLIC swiftscan_string_set_t *
 swiftscan_clang_detail_get_captured_pcm_args(swiftscan_module_details_t details);
 
+SWIFTSCAN_PUBLIC swiftscan_string_ref_t
+swiftscan_clang_detail_get_cas_fs_root_id(swiftscan_module_details_t details);
+
 //=== Batch Scan Input Functions ------------------------------------------===//
 
 /// Create an \c swiftscan_batch_scan_input_t instance.

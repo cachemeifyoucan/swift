@@ -173,7 +173,8 @@ using ClangModuleDetailsLayout =
                    ContextHashIDField,        // contextHash
                    FlagIDArrayIDField,        // commandLine
                    FileIDArrayIDField,        // fileDependencies
-                   FlagIDArrayIDField         // capturedPCMArgs
+                   FlagIDArrayIDField,        // capturedPCMArgs
+                   IdentifierIDField          // CASFileSystemRootID
                    >;
 } // namespace graph_block
 

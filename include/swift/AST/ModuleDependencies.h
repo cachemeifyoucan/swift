@@ -25,6 +25,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/Support/Mutex.h"
 #include <string>
 #include <vector>
@@ -280,20 +281,25 @@ public:
   /// as found by the scanning action that discovered it
   const std::vector<std::string> capturedPCMArgs;
 
+  /// CASID for the Root of CASFS. Empty if CAS is not used.
+  const std::string CASFileSystemRootID;
+
   ClangModuleDependencyStorage(
       const std::string &pcmOutputPath,
       const std::string &moduleMapFile,
       const std::string &contextHash,
       const std::vector<std::string> &nonPathCommandLine,
       const std::vector<std::string> &fileDependencies,
-      const std::vector<std::string> &capturedPCMArgs
+      const std::vector<std::string> &capturedPCMArgs,
+      const std::string &CASFileSystemRootID
   ) : ModuleDependencyInfoStorageBase(ModuleDependencyKind::Clang),
       pcmOutputPath(pcmOutputPath),
       moduleMapFile(moduleMapFile),
       contextHash(contextHash),
       nonPathCommandLine(nonPathCommandLine),
       fileDependencies(fileDependencies),
-      capturedPCMArgs(capturedPCMArgs) {}
+      capturedPCMArgs(capturedPCMArgs),
+      CASFileSystemRootID(CASFileSystemRootID) {}
 
   ModuleDependencyInfoStorageBase *clone() const override {
     return new ClangModuleDependencyStorage(*this);
@@ -403,11 +409,13 @@ public:
       const std::string &contextHash,
       const std::vector<std::string> &nonPathCommandLine,
       const std::vector<std::string> &fileDependencies,
-      const std::vector<std::string> &capturedPCMArgs) {
+      const std::vector<std::string> &capturedPCMArgs,
+      const std::string &CASFileSystemRootID) {
     return ModuleDependencyInfo(
         std::make_unique<ClangModuleDependencyStorage>(
           pcmOutputPath, moduleMapFile, contextHash,
-          nonPathCommandLine, fileDependencies, capturedPCMArgs));
+          nonPathCommandLine, fileDependencies, capturedPCMArgs,
+          CASFileSystemRootID));
   }
 
   /// Describe a placeholder dependency swift module.
@@ -561,7 +569,10 @@ class SwiftDependencyScanningService {
   };
 
   /// The persistent Clang dependency scanner service
-  clang::tooling::dependencies::DependencyScanningService ClangScanningService;
+  Optional<clang::tooling::dependencies::DependencyScanningService>
+      ClangScanningService;
+  llvm::IntrusiveRefCntPtr<llvm::cas::CachingOnDiskFileSystem> CacheFS;
+
   /// The global file system cache.
   Optional<
       clang::tooling::dependencies::DependencyScanningFilesystemSharedCache>
@@ -615,6 +626,9 @@ public:
   /// Wrap the filesystem on the specified `CompilerInstance` with a
   /// caching `DependencyScanningWorkerFilesystem`
   void overlaySharedFilesystemCacheForCompilation(CompilerInstance &Instance);
+
+  /// Setup caching service.
+  void setupCachingDependencyScanningService(CompilerInstance &Instance);
 private:
   /// Enforce clients not being allowed to query this cache directly, it must be
   /// wrapped in an instance of `ModuleDependenciesCache`.

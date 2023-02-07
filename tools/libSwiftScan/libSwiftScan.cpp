@@ -69,6 +69,7 @@ void swiftscan_dependency_info_details_dispose(
     swiftscan_string_dispose(details_impl->clang_details.context_hash);
     swiftscan_string_set_dispose(details_impl->clang_details.command_line);
     swiftscan_string_set_dispose(details_impl->clang_details.captured_pcm_args);
+    swiftscan_string_dispose(details_impl->clang_details.cas_fs_root_id);
     break;
   }
   delete details_impl;
@@ -349,6 +350,11 @@ swiftscan_clang_detail_get_command_line(swiftscan_module_details_t details) {
 swiftscan_string_set_t *
 swiftscan_clang_detail_get_captured_pcm_args(swiftscan_module_details_t details) {
   return details->clang_details.captured_pcm_args;
+}
+
+swiftscan_string_ref_t
+swiftscan_clang_detail_get_cas_fs_root_id(swiftscan_module_details_t details) {
+  return details->clang_details.cas_fs_root_id;
 }
 
 //=== Batch Scan Input Functions ------------------------------------------===//

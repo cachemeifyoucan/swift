@@ -538,6 +538,12 @@ public:
 
   llvm::cas::ObjectStore &getObjectStore() const { return *CAS; }
   llvm::cas::ActionCache &getActionCache() const { return *Cache; }
+  std::shared_ptr<llvm::cas::ActionCache> getSharedCacheInstance() const {
+    return Cache;
+  }
+  std::shared_ptr<llvm::cas::ObjectStore> getSharedCASInstance() const {
+    return CAS;
+  }
 
   ASTContext &getASTContext() { return *Context; }
   const ASTContext &getASTContext() const { return *Context; }

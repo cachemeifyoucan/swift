@@ -466,11 +466,12 @@ bool ModuleDependenciesCacheDeserializer::readGraph(SwiftDependencyScanningServi
         llvm::report_fatal_error("Unexpected CLANG_MODULE_DETAILS_NODE record");
       cache.configureForContextHash(getContextHash());
       unsigned pcmOutputPathID, moduleMapPathID, contextHashID, commandLineArrayID,
-               fileDependenciesArrayID, capturedPCMArgsArrayID;
+               fileDependenciesArrayID, capturedPCMArgsArrayID, CASFileSystemRootID;
       ClangModuleDetailsLayout::readRecord(Scratch, pcmOutputPathID, moduleMapPathID,
                                            contextHashID, commandLineArrayID,
                                            fileDependenciesArrayID,
-                                           capturedPCMArgsArrayID);
+                                           capturedPCMArgsArrayID,
+                                           CASFileSystemRootID);
       auto pcmOutputPath = getIdentifier(pcmOutputPathID);
       if (!pcmOutputPath)
         llvm::report_fatal_error("Bad pcm output path");
@@ -489,11 +490,14 @@ bool ModuleDependenciesCacheDeserializer::readGraph(SwiftDependencyScanningServi
       auto capturedPCMArgs = getStringArray(capturedPCMArgsArrayID);
       if (!capturedPCMArgs)
         llvm::report_fatal_error("Bad captured PCM Args");
+      auto rootFileSystemID = getIdentifier(CASFileSystemRootID);
+      if (!rootFileSystemID)
+        llvm::report_fatal_error("Bad CASFileSystem RootID");
 
       // Form the dependencies storage object
       auto moduleDep = ModuleDependencyInfo::forClangModule(*pcmOutputPath,
           *moduleMapPath, *contextHash, *commandLineArgs, *fileDependencies,
-          *capturedPCMArgs);
+          *capturedPCMArgs, *rootFileSystemID);
 
       // Add dependencies of this module
       for (const auto &moduleName : *currentModuleImports)
@@ -904,7 +908,8 @@ void ModuleDependenciesCacheSerializer::writeModuleInfo(ModuleDependencyID modul
         getIdentifier(clangDeps->contextHash),
         getArrayID(moduleID, ModuleIdentifierArrayKind::NonPathCommandLine),
         getArrayID(moduleID, ModuleIdentifierArrayKind::FileDependencies),
-        getArrayID(moduleID, ModuleIdentifierArrayKind::CapturedPCMArgs));
+        getArrayID(moduleID, ModuleIdentifierArrayKind::CapturedPCMArgs),
+        getIdentifier(clangDeps->CASFileSystemRootID));
 
     break;
   }
@@ -1079,6 +1084,7 @@ void ModuleDependenciesCacheSerializer::collectStringsAndArrays(
                    clangDeps->fileDependencies);
           addStringArray(moduleID, ModuleIdentifierArrayKind::CapturedPCMArgs,
                    clangDeps->capturedPCMArgs);
+          addIdentifier(clangDeps->CASFileSystemRootID);
           break;
         }
         default:

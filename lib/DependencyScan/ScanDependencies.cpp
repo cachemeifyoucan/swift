@@ -920,6 +920,11 @@ static void writeJSON(llvm::raw_ostream &out,
       // Captured PCM arguments.
       writeJSONSingleField(out, "capturedPCMArgs", clangDeps->captured_pcm_args, 5,
                            /*trailingComma=*/false, /*nested=*/true);
+
+      if (clangDeps->cas_fs_root_id.length != 0) {
+        writeJSONSingleField(out, "casFSRootID", clangDeps->cas_fs_root_id, 5,
+                             /*trailingComma=*/true);
+      }
     }
 
     out.indent(4 * 2);
@@ -1059,7 +1064,8 @@ generateFullDependencyGraph(CompilerInstance &instance,
             create_clone(clangDeps->moduleMapFile.c_str()),
             create_clone(clangDeps->contextHash.c_str()),
             create_set(clangDeps->nonPathCommandLine),
-            create_set(clangDeps->capturedPCMArgs)
+            create_set(clangDeps->capturedPCMArgs),
+            create_clone(clangDeps->CASFileSystemRootID.c_str())
         };
       }
       return details;
@@ -1402,6 +1408,7 @@ bool swift::dependencies::scanDependencies(CompilerInstance &instance) {
     deserializeDependencyCache(instance, service);
   // Wrap the filesystem with a caching `DependencyScanningWorkerFilesystem`
   service.overlaySharedFilesystemCacheForCompilation(instance);
+  service.setupCachingDependencyScanningService(instance);
   ModuleDependenciesCache cache(service,
                                 instance.getMainModule()->getNameStr().str(),
                                 instance.getInvocation().getModuleScanningHash());
@@ -1475,6 +1482,7 @@ bool swift::dependencies::batchScanDependencies(
 
   SwiftDependencyScanningService singleUseService;
   singleUseService.overlaySharedFilesystemCacheForCompilation(instance);
+  singleUseService.setupCachingDependencyScanningService(instance);
   ModuleDependenciesCache cache(singleUseService,
                                 instance.getMainModule()->getNameStr().str(),
                                 instance.getInvocation().getModuleScanningHash());

@@ -404,21 +404,17 @@ bool CompilerInstance::setupCASIfNeeded() {
   if (!Opts.EnableCAS)
     return false;
 
-  std::string Path = Opts.CASObjectStorePath.empty()
-                         ? llvm::cas::getDefaultOnDiskCASPath()
-                         : Opts.CASObjectStorePath;
-  if (auto E = llvm::cas::createOnDiskCAS(Path).moveInto(CAS)) {
-    Diagnostics.diagnose(SourceLoc(), diag::error_create_cas, Path,
-                         toString(std::move(E)));
+  if (auto E =
+          llvm::cas::createOnDiskCAS(Opts.CASObjectStorePath).moveInto(CAS)) {
+    Diagnostics.diagnose(SourceLoc(), diag::error_create_cas,
+                         Opts.CASObjectStorePath, toString(std::move(E)));
     return true;
   }
 
-  Path = Opts.CASActionCachePath.empty()
-             ? llvm::cas::getDefaultOnDiskActionCachePath()
-             : Opts.CASActionCachePath;
-  if (auto E = llvm::cas::createOnDiskActionCache(Path).moveInto(Cache)) {
-    Diagnostics.diagnose(SourceLoc(), diag::error_create_cas, Path,
-                         toString(std::move(E)));
+  if (auto E = llvm::cas::createOnDiskActionCache(Opts.CASActionCachePath)
+                   .moveInto(Cache)) {
+    Diagnostics.diagnose(SourceLoc(), diag::error_create_cas,
+                         Opts.CASActionCachePath, toString(std::move(E)));
     return true;
   }
 

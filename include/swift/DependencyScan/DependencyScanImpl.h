@@ -135,6 +135,9 @@ typedef struct {
 
   /// The swift-specific PCM arguments captured by this dependencies object
   swiftscan_string_set_t *captured_pcm_args;
+
+  /// The CASID for CASFileSystemRoot
+  swiftscan_string_ref_t cas_fs_root_id;
 } swiftscan_clang_details_t;
 
 struct swiftscan_module_details_s {
