@@ -163,6 +163,9 @@ public:
   /// Details common to Swift textual (interface or source) modules
   CommonSwiftTextualModuleDependencyDetails textualModuleDetails;
 
+  /// CASID for the Root of CASFS. Empty if CAS is not used.
+  std::string CASFileSystemRootID;
+
   SwiftInterfaceModuleDependenciesStorage(
       const std::string moduleOutputPath,
       const std::string swiftInterfaceFile,
@@ -170,7 +173,8 @@ public:
       ArrayRef<StringRef> buildCommandLine,
       ArrayRef<StringRef> extraPCMArgs,
       StringRef contextHash,
-      bool isFramework
+      bool isFramework,
+      const std::string RootID
   ) : ModuleDependencyInfoStorageBase(ModuleDependencyKind::SwiftInterface),
       moduleOutputPath(moduleOutputPath),
       swiftInterfaceFile(swiftInterfaceFile),
@@ -178,7 +182,7 @@ public:
                                compiledModuleCandidates.end()),
       buildCommandLine(buildCommandLine.begin(), buildCommandLine.end()),
       contextHash(contextHash), isFramework(isFramework),
-      textualModuleDetails(extraPCMArgs)
+      textualModuleDetails(extraPCMArgs), CASFileSystemRootID(RootID)
       {}
 
   ModuleDependencyInfoStorageBase *clone() const override {
@@ -191,6 +195,10 @@ public:
 
   void updateCommandLine(const std::vector<std::string> &newCommandLine) {
     buildCommandLine = newCommandLine;
+  }
+
+  void updateCASFileSystemID(const std::string &ID) {
+    CASFileSystemRootID = ID;
   }
 };
 
@@ -377,11 +385,11 @@ public:
       ArrayRef<StringRef> buildCommands,
       ArrayRef<StringRef> extraPCMArgs,
       StringRef contextHash,
-      bool isFramework) {
+      bool isFramework, const std::string CASFileSystemRootID) {
     return ModuleDependencyInfo(
         std::make_unique<SwiftInterfaceModuleDependenciesStorage>(
           moduleOutputPath, swiftInterfaceFile, compiledCandidates, buildCommands,
-          extraPCMArgs, contextHash, isFramework));
+          extraPCMArgs, contextHash, isFramework, CASFileSystemRootID));
   }
 
   /// Describe the module dependencies for a serialized or parsed Swift module.
@@ -449,6 +457,13 @@ public:
   void updateCommandLine(const std::vector<std::string> &newCommandLine) {
     assert(isSwiftInterfaceModule() && "Can only update command line on Swift interface dependency");
     cast<SwiftInterfaceModuleDependenciesStorage>(storage.get())->updateCommandLine(newCommandLine);
+  }
+
+  void updateCASFileSystemID(const std::string &ID) {
+    assert(isSwiftInterfaceModule() &&
+           "Can only update CASFS on Swift interface dependency");
+    cast<SwiftInterfaceModuleDependenciesStorage>(storage.get())
+        ->updateCASFileSystemID(ID);
   }
 
   bool isResolved() const {
@@ -623,6 +638,13 @@ public:
     return getCacheForScanningContextHash(scanningContextHash)->alreadySeenClangModules;
   }
 
+  bool usingCachingFS() const { return (bool)CacheFS; }
+
+  llvm::cas::CachingOnDiskFileSystem &getSharedCachingFS() const {
+    assert(CacheFS && "Expect CachingOnDiskFileSystem");
+    return *CacheFS;
+  }
+
   /// Wrap the filesystem on the specified `CompilerInstance` with a
   /// caching `DependencyScanningWorkerFilesystem`
   void overlaySharedFilesystemCacheForCompilation(CompilerInstance &Instance);
@@ -723,6 +745,9 @@ public:
   /// Produce a reference to the Clang scanner tool associated with this cache
   clang::tooling::dependencies::DependencyScanningTool& getClangScannerTool() {
     return clangScanningTool;
+  }
+  SwiftDependencyScanningService &getScanService() {
+    return globalScanningService;
   }
   llvm::StringSet<>& getAlreadySeenClangModules() {
     return globalScanningService.getAlreadySeenClangModules(scannerContextHash);

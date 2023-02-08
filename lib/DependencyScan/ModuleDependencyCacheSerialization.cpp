@@ -235,15 +235,17 @@ bool ModuleDependenciesCacheDeserializer::readGraph(SwiftDependencyScanningServi
         llvm::report_fatal_error(
             "Unexpected SWIFT_TEXTUAL_MODULE_DETAILS_NODE record");
       cache.configureForContextHash(getContextHash());
-      unsigned outputPathFileID, interfaceFileID, compiledModuleCandidatesArrayID,
-          buildCommandLineArrayID, extraPCMArgsArrayID, contextHashID,
-          isFramework, bridgingHeaderFileID, sourceFilesArrayID,
-          bridgingSourceFilesArrayID, bridgingModuleDependenciesArrayID;
+      unsigned outputPathFileID, interfaceFileID,
+          compiledModuleCandidatesArrayID, buildCommandLineArrayID,
+          extraPCMArgsArrayID, contextHashID, isFramework, bridgingHeaderFileID,
+          sourceFilesArrayID, bridgingSourceFilesArrayID,
+          bridgingModuleDependenciesArrayID, CASFileSystemRootID;
       SwiftInterfaceModuleDetailsLayout::readRecord(
-          Scratch, outputPathFileID, interfaceFileID, compiledModuleCandidatesArrayID,
-          buildCommandLineArrayID, extraPCMArgsArrayID, contextHashID,
-          isFramework, bridgingHeaderFileID, sourceFilesArrayID,
-          bridgingSourceFilesArrayID, bridgingModuleDependenciesArrayID);
+          Scratch, outputPathFileID, interfaceFileID,
+          compiledModuleCandidatesArrayID, buildCommandLineArrayID,
+          extraPCMArgsArrayID, contextHashID, isFramework, bridgingHeaderFileID,
+          sourceFilesArrayID, bridgingSourceFilesArrayID,
+          bridgingModuleDependenciesArrayID, CASFileSystemRootID);
 
       auto outputModulePath = getIdentifier(outputPathFileID);
       if (!outputModulePath)
@@ -276,11 +278,15 @@ bool ModuleDependenciesCacheDeserializer::readGraph(SwiftDependencyScanningServi
       for (auto &arg : *extraPCMArgs)
         extraPCMRefs.push_back(arg);
 
+      auto rootFileSystemID = getIdentifier(CASFileSystemRootID);
+      if (!rootFileSystemID)
+        llvm::report_fatal_error("Bad CASFileSystem RootID");
+
       // Form the dependencies storage object
       auto moduleDep = ModuleDependencyInfo::forSwiftInterfaceModule(
-          outputModulePath.value(),
-          optionalSwiftInterfaceFile.value(), *compiledModuleCandidates,
-          buildCommandRefs, extraPCMRefs, *contextHash, isFramework);
+          outputModulePath.value(), optionalSwiftInterfaceFile.value(),
+          *compiledModuleCandidates, buildCommandRefs, extraPCMRefs,
+          *contextHash, isFramework, *rootFileSystemID);
 
       // Add imports of this module
       for (const auto &moduleName : *currentModuleImports)
@@ -850,7 +856,8 @@ void ModuleDependenciesCacheSerializer::writeModuleInfo(ModuleDependencyID modul
         bridgingHeaderFileId,
         getArrayID(moduleID, ModuleIdentifierArrayKind::SourceFiles),
         getArrayID(moduleID, ModuleIdentifierArrayKind::BridgingSourceFiles),
-        getArrayID(moduleID, ModuleIdentifierArrayKind::BridgingModuleDependencies));
+        getArrayID(moduleID, ModuleIdentifierArrayKind::BridgingModuleDependencies),
+        getIdentifier(swiftTextDeps->CASFileSystemRootID));
     break;
   }
   case swift::ModuleDependencyKind::SwiftSource: {

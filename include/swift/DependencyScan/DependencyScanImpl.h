@@ -92,6 +92,9 @@ typedef struct {
 
   /// A flag to indicate whether or not this module is a framework.
   bool is_framework;
+
+  /// The CASID for CASFileSystemRoot
+  swiftscan_string_ref_t cas_fs_root_id;
 } swiftscan_swift_textual_details_t;
 
 /// Swift modules with only a binary module file.

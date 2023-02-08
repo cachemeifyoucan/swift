@@ -145,7 +145,7 @@ ErrorOr<ModuleDependencyInfo> ModuleDependencyScanner::scanInterfaceFile(
     std::vector<StringRef> ArgsRefs(Args.begin(), Args.end());
     Result = ModuleDependencyInfo::forSwiftInterfaceModule(
         outputPathBase.str().str(), InPath, compiledCandidates, ArgsRefs, PCMArgs,
-        Hash, isFramework);
+        Hash, isFramework, "");
 
     // Open the interface file.
     auto &fs = *Ctx.SourceMgr.getFileSystem();

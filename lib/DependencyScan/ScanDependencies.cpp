@@ -821,6 +821,11 @@ static void writeJSON(llvm::raw_ostream &out,
       bool commaAfterFramework =
           swiftTextualDeps->extra_pcm_args->count != 0 || hasBridgingHeaderPath;
 
+      if (swiftTextualDeps->cas_fs_root_id.length != 0) {
+        writeJSONSingleField(out, "casFSRootID",
+                             swiftTextualDeps->cas_fs_root_id, 5,
+                             /*trailingComma=*/true);
+      }
       writeJSONSingleField(out, "isFramework", swiftTextualDeps->is_framework,
                            5, commaAfterFramework);
       if (swiftTextualDeps->extra_pcm_args->count != 0) {
@@ -917,14 +922,14 @@ static void writeJSON(llvm::raw_ostream &out,
       writeJSONSingleField(out, "commandLine", clangDeps->command_line, 5,
                            /*trailingComma=*/true);
 
+      if (clangDeps->cas_fs_root_id.length != 0)
+        writeJSONSingleField(out, "casFSRootID", clangDeps->cas_fs_root_id, 5,
+                             /*trailingComma=*/true);
+
       // Captured PCM arguments.
       writeJSONSingleField(out, "capturedPCMArgs", clangDeps->captured_pcm_args, 5,
                            /*trailingComma=*/false, /*nested=*/true);
 
-      if (clangDeps->cas_fs_root_id.length != 0) {
-        writeJSONSingleField(out, "casFSRootID", clangDeps->cas_fs_root_id, 5,
-                             /*trailingComma=*/true);
-      }
     }
 
     out.indent(4 * 2);
@@ -1023,7 +1028,8 @@ generateFullDependencyGraph(CompilerInstance &instance,
             create_set(swiftTextualDeps->buildCommandLine),
             create_set(swiftTextualDeps->textualModuleDetails.extraPCMArgs),
             create_clone(swiftTextualDeps->contextHash.c_str()),
-            swiftTextualDeps->isFramework};
+            swiftTextualDeps->isFramework,
+            create_clone(swiftTextualDeps->CASFileSystemRootID.c_str())};
       } else if (swiftSourceDeps) {
         swiftscan_string_ref_t moduleInterfacePath = create_null();
         swiftscan_string_ref_t bridgingHeaderPath =
@@ -1043,7 +1049,8 @@ generateFullDependencyGraph(CompilerInstance &instance,
             create_empty_set(),
             create_set(swiftSourceDeps->textualModuleDetails.extraPCMArgs),
             /*contextHash*/create_null(),
-            /*isFramework*/false};
+            /*isFramework*/false,
+            create_clone("")};
       } else if (swiftPlaceholderDeps) {
         details->kind = SWIFTSCAN_DEPENDENCY_INFO_SWIFT_PLACEHOLDER;
         details->swift_placeholder_details = {
