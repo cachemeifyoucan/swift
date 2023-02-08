@@ -266,6 +266,9 @@ DependencyScanningTool::initCompilerInstanceForScan(
   }
   (void)Instance->getMainModule();
 
+  // Setup the caching service after the instance finishes setup.
+  ScanningService->setupCachingDependencyScanningService(*Instance);
+
   return Instance;
 }
 

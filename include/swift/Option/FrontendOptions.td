@@ -1183,15 +1183,6 @@ def always_compile_output_files :
   Flag<["-"], "always-compile-output-files">,
   HelpText<"Always compile output files even it might not change the results">;
 
-def enable_cas: Flag<["-"], "enable-cas">,
-  HelpText<"Enable CAS for swift-frontend">;
-def object_store_path: Separate<["-"], "object-store-path">,
-  HelpText<"Path to CAS ObjectStore">, MetaVarName<"<path>">;
-def action_cache_path: Separate<["-"], "action-cache-path">,
-  HelpText<"Path to CAS ActionCache">, MetaVarName<"<path>">;
-def cas_fs: Separate<["-"], "cas-fs">,
-  HelpText<"Root CASID for CAS FileSystem">, MetaVarName<"<cas-id>">;
-
 def experimental_spi_only_imports :
   Flag<["-"], "experimental-spi-only-imports">,
   HelpText<"Enable use of @_spiOnly imports">;

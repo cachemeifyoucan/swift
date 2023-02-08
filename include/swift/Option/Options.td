@@ -1805,6 +1805,19 @@ def nostartfiles:
          HelpHidden, NewDriverOnlyOption]>,
   HelpText<"Do not link in the Swift language startup routines">;
 
+def enable_cas: Flag<["-"], "enable-cas">,
+  Flags<[FrontendOption, NewDriverOnlyOption]>,
+  HelpText<"Enable CAS for swift-frontend">;
+def object_store_path: Separate<["-"], "object-store-path">,
+  Flags<[FrontendOption, NewDriverOnlyOption]>,
+  HelpText<"Path to CAS ObjectStore">, MetaVarName<"<path>">;
+def action_cache_path: Separate<["-"], "action-cache-path">,
+  Flags<[FrontendOption, NewDriverOnlyOption]>,
+  HelpText<"Path to CAS ActionCache">, MetaVarName<"<path>">;
+def cas_fs: Separate<["-"], "cas-fs">,
+  Flags<[FrontendOption, NewDriverOnlyOption]>,
+  HelpText<"Root CASID for CAS FileSystem">, MetaVarName<"<cas-id>">;
+
 // END ONLY SUPPORTED IN NEW DRIVER
 
 def load_plugin_library:

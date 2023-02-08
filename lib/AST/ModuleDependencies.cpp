@@ -398,7 +398,7 @@ ModuleDependenciesCache::ModuleDependenciesCache(
       mainScanModuleName(mainScanModuleName),
       scannerContextHash(scannerContextHash),
       clangScanningTool(*globalScanningService.ClangScanningService,
-                        globalScanningService.CacheFS) {
+                        globalScanningService.CacheFS->createProxyFS()) {
   globalScanningService.configureForContextHash(scannerContextHash);
   for (auto kind = ModuleDependencyKind::FirstKind;
        kind != ModuleDependencyKind::LastKind; ++kind) {
