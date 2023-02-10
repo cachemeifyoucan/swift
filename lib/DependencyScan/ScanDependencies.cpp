@@ -41,7 +41,10 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/CAS/CASReference.h"
+#include "llvm/CAS/HierarchicalTreeBuilder.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/StringSaver.h"
 #include "llvm/Support/YAMLParser.h"
@@ -248,7 +251,32 @@ computeTransitiveClosureOfExplicitDependencies(
   return result;
 }
 
-static void
+static llvm::Expected<std::string>
+mergeCASFileSystem(llvm::cas::ObjectStore &CAS, ArrayRef<std::string> FSRoots) {
+  assert(!FSRoots.empty() && "no root ID provided");
+  // If there is only ID, no need to merge.
+  if (FSRoots.size() == 1)
+    return FSRoots.front();
+
+  llvm::cas::HierarchicalTreeBuilder Builder;
+  for (auto &Root : FSRoots) {
+    auto ID = CAS.parseID(Root);
+    if (!ID)
+      return ID.takeError();
+
+    auto Ref = CAS.getReference(*ID);
+    assert(Ref && "CASFSRootID is missing from the ObjectStore instance");
+    Builder.pushTreeContent(*Ref, "");
+  }
+
+  auto NewRoot = Builder.create(CAS);
+  if (!NewRoot)
+    return NewRoot.takeError();
+
+  return NewRoot->getID().toString();
+}
+
+static llvm::Error
 resolveExplicitModuleInputs(ModuleDependencyID moduleID,
                             const ModuleDependencyInfo &resolvingDepInfo,
                             const std::set<ModuleDependencyID> &dependencies,
@@ -257,6 +285,10 @@ resolveExplicitModuleInputs(ModuleDependencyID moduleID,
       resolvingDepInfo.getAsSwiftInterfaceModule();
   assert(resolvingInterfaceDepDetails &&
          "Expected Swift Interface dependency.");
+
+  std::vector<std::string> rootIDs;
+  if (auto ID = resolvingDepInfo.getCASFSRootID())
+    rootIDs.push_back(*ID);
 
   auto commandLine = resolvingInterfaceDepDetails->buildCommandLine;
   for (const auto &depModuleID : dependencies) {
@@ -292,6 +324,9 @@ resolveExplicitModuleInputs(ModuleDependencyID moduleID,
       commandLine.push_back("-Xcc");
       commandLine.push_back("-fmodule-map-file=" +
                             clangDepDetails->moduleMapFile);
+      // Only need to merge the CASFS from clang importer.
+      if (auto ID = depInfo->getCASFSRootID())
+        rootIDs.push_back(*ID);
     } break;
     default:
       llvm_unreachable("Unhandled dependency kind.");
@@ -300,8 +335,20 @@ resolveExplicitModuleInputs(ModuleDependencyID moduleID,
 
   // Update the dependency in the cache with the modified command-line.
   auto dependencyInfoCopy = resolvingDepInfo;
+  if (!rootIDs.empty()) {
+    auto CASFS = cache.getScanService().getSharedCachingFS();
+    assert(CASFS && "Expect CASFS");
+    auto NewRoot = mergeCASFileSystem(CASFS->getCAS(), rootIDs);
+    if (!NewRoot)
+      return NewRoot.takeError();
+    dependencyInfoCopy.updateCASFileSystemID(*NewRoot);
+    commandLine.push_back("-cas-fs");
+    commandLine.push_back(*NewRoot);
+  }
   dependencyInfoCopy.updateCommandLine(commandLine);
   cache.updateDependency(moduleID, dependencyInfoCopy);
+
+  return llvm::Error::success();
 }
 
 /// Resolve the direct dependencies of the given module.
@@ -1666,7 +1713,10 @@ swift::dependencies::performModuleScan(CompilerInstance &instance,
     auto optionalDeps = cache.findDependency(modID.first, modID.second);
     assert(optionalDeps.has_value());
     auto deps = optionalDeps.value();
-    resolveExplicitModuleInputs(modID, *deps, dependencyClosure.second, cache);
+    if (auto E = resolveExplicitModuleInputs(modID, *deps,
+                                             dependencyClosure.second, cache))
+      instance.getDiags().diagnose(SourceLoc(), diag::error_cas,
+                                   toString(std::move(E)));
   }
 
   auto dependencyGraph = generateFullDependencyGraph(

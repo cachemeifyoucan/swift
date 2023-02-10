@@ -13,6 +13,7 @@
 #include "swift/AST/ASTContext.h"
 #include "swift/Frontend/ModuleInterfaceLoader.h"
 #include "swift/Serialization/SerializedModuleLoader.h"
+#include "llvm/CAS/CachingOnDiskFileSystem.h"
 
 namespace swift {
     /// A module "loader" that looks for .swiftinterface and .swiftmodule files
@@ -40,18 +41,21 @@ namespace swift {
 
       /// Location where pre-built moduels are to be built into.
       std::string moduleCachePath;
+
+      llvm::cas::CachingOnDiskFileSystem *CacheFS;
     public:
       Optional<ModuleDependencyInfo> dependencies;
 
       ModuleDependencyScanner(ASTContext &ctx, ModuleLoadingMode LoadMode,
                               Identifier moduleName,
                               InterfaceSubContextDelegate &astDelegate,
-                              ScannerKind kind = MDS_plain)
+                              ScannerKind kind = MDS_plain,
+                              llvm::cas::CachingOnDiskFileSystem *FS = nullptr)
           : SerializedModuleLoaderBase(ctx, nullptr, LoadMode,
                                        /*IgnoreSwiftSourceInfoFile=*/true),
             kind(kind), moduleName(moduleName), astDelegate(astDelegate),
             moduleCachePath(getModuleCachePathFromClang(
-                ctx.getClangModuleLoader()->getClangInstance())) {}
+                ctx.getClangModuleLoader()->getClangInstance())), CacheFS(FS) {}
 
       std::error_code findModuleFilesInDirectory(
           ImportPath::Element ModuleID,
@@ -107,9 +111,10 @@ namespace swift {
       PlaceholderSwiftModuleScanner(ASTContext &ctx, ModuleLoadingMode LoadMode,
                                     Identifier moduleName,
                                     StringRef PlaceholderDependencyModuleMap,
-                                    InterfaceSubContextDelegate &astDelegate)
+                                    InterfaceSubContextDelegate &astDelegate,
+                                    llvm::cas::CachingOnDiskFileSystem *FS = nullptr)
           : ModuleDependencyScanner(ctx, LoadMode, moduleName, astDelegate,
-                                    MDS_placeholder) {
+                                    MDS_placeholder, FS) {
 
         // FIXME: Find a better place for this map to live, to avoid
         // doing the parsing on every module.

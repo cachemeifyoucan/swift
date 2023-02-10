@@ -155,6 +155,26 @@ Optional<std::string> ModuleDependencyInfo::getBridgingHeader() const {
   }
 }
 
+Optional<std::string> ModuleDependencyInfo::getCASFSRootID() const {
+  switch (getKind()) {
+  case swift::ModuleDependencyKind::SwiftInterface: {
+    auto swiftInterfaceStorage =
+        cast<SwiftInterfaceModuleDependenciesStorage>(storage.get());
+    return swiftInterfaceStorage->CASFileSystemRootID;
+  }
+  case swift::ModuleDependencyKind::SwiftSource: {
+    // TO BE ADDED.
+    return None;
+  }
+  case swift::ModuleDependencyKind::Clang: {
+    auto clangModuleStorage = cast<ClangModuleDependencyStorage>(storage.get());
+    return clangModuleStorage->CASFileSystemRootID;
+  }
+  default:
+    return None;
+  }
+}
+
 void ModuleDependencyInfo::addBridgingHeader(StringRef bridgingHeader) {
   switch (getKind()) {
   case swift::ModuleDependencyKind::SwiftInterface: {

@@ -1656,6 +1656,8 @@ InterfaceSubContextDelegateImpl::InterfaceSubContextDelegateImpl(
   // required by sourcekitd.
   subClangImporterOpts.DetailedPreprocessingRecord =
     clangImporterOpts.DetailedPreprocessingRecord;
+  subClangImporterOpts.ObjectStorePath = clangImporterOpts.ObjectStorePath;
+  subClangImporterOpts.ActionCachePath = clangImporterOpts.ActionCachePath;
 
   // If the compiler has been asked to be strict with ensuring downstream dependencies
   // get the parent invocation's context, or this is an Explicit build, inherit the
@@ -1774,10 +1776,11 @@ std::error_code
 InterfaceSubContextDelegateImpl::runInSubContext(StringRef moduleName,
                                                  StringRef interfacePath,
                                                  StringRef outputPath,
+                                                 llvm::vfs::FileSystem *FS,
                                                  SourceLoc diagLoc,
     llvm::function_ref<std::error_code(ASTContext&, ModuleDecl*, ArrayRef<StringRef>,
                             ArrayRef<StringRef>, StringRef)> action) {
-  return runInSubCompilerInstance(moduleName, interfacePath, outputPath,
+  return runInSubCompilerInstance(moduleName, interfacePath, outputPath, FS,
                                   diagLoc, /*silenceErrors=*/false,
                                   [&](SubCompilerInstanceInfo &info){
     return action(info.Instance->getASTContext(),
@@ -1792,6 +1795,7 @@ std::error_code
 InterfaceSubContextDelegateImpl::runInSubCompilerInstance(StringRef moduleName,
                                                           StringRef interfacePath,
                                                           StringRef outputPath,
+                                                          llvm::vfs::FileSystem *FS,
                                                           SourceLoc diagLoc,
                                                           bool silenceErrors,
                   llvm::function_ref<std::error_code(SubCompilerInstanceInfo&)> action) {
@@ -1885,7 +1889,10 @@ InterfaceSubContextDelegateImpl::runInSubCompilerInstance(StringRef moduleName,
   info.Instance = &subInstance;
   info.CompilerVersion = CompilerVersion;
 
-  subInstance.getSourceMgr().setFileSystem(SM.getFileSystem());
+  if (FS)
+    subInstance.getSourceMgr().setFileSystem(FS);
+  else
+    subInstance.getSourceMgr().setFileSystem(SM.getFileSystem());
 
   ForwardingDiagnosticConsumer FDC(*Diags);
   if (!silenceErrors)

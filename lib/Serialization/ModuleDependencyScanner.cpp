@@ -21,6 +21,8 @@
 #include "swift/Serialization/SerializedModuleLoader.h"
 #include "swift/Serialization/ModuleDependencyScanner.h"
 #include "swift/Subsystems.h"
+#include "llvm/ADT/IntrusiveRefCntPtr.h"
+#include "llvm/CAS/CachingOnDiskFileSystem.h"
 using namespace swift;
 using llvm::ErrorOr;
 
@@ -109,10 +111,16 @@ ErrorOr<ModuleDependencyInfo> ModuleDependencyScanner::scanInterfaceFile(
   llvm::SmallString<32> modulePath = realModuleName.str();
   llvm::sys::path::replace_extension(modulePath, newExt);
   Optional<ModuleDependencyInfo> Result;
+  llvm::IntrusiveRefCntPtr<llvm::cas::CachingOnDiskFileSystem> CASFS = nullptr;
+  if (CacheFS) {
+    CASFS = CacheFS->createProxyFS();
+    CASFS->trackNewAccesses();
+  }
   std::error_code code =
     astDelegate.runInSubContext(realModuleName.str(),
                                               moduleInterfacePath.str(),
                                               StringRef(),
+                                              CASFS.get(),
                                               SourceLoc(),
                 [&](ASTContext &Ctx, ModuleDecl *mainMod,
                     ArrayRef<StringRef> BaseArgs,
@@ -142,11 +150,6 @@ ErrorOr<ModuleDependencyInfo> ModuleDependencyScanner::scanInterfaceFile(
     Args.push_back("-o");
     Args.push_back(outputPathBase.str().str());
 
-    std::vector<StringRef> ArgsRefs(Args.begin(), Args.end());
-    Result = ModuleDependencyInfo::forSwiftInterfaceModule(
-        outputPathBase.str().str(), InPath, compiledCandidates, ArgsRefs, PCMArgs,
-        Hash, isFramework, "");
-
     // Open the interface file.
     auto &fs = *Ctx.SourceMgr.getFileSystem();
     auto interfaceBuf = fs.getBufferForFile(moduleInterfacePath);
@@ -161,6 +164,21 @@ ErrorOr<ModuleDependencyInfo> ModuleDependencyScanner::scanInterfaceFile(
         *moduleDecl, SourceFileKind::Interface, bufferID);
     moduleDecl->addAuxiliaryFile(*sourceFile);
 
+    std::string RootID;
+    if (CASFS) {
+      RootID = cantFail(CASFS->createTreeFromNewAccesses()).getID().toString();
+      Args.push_back("-enable-cas");
+      Args.push_back("-object-store-path");
+      Args.push_back(Ctx.ClangImporterOpts.ObjectStorePath);
+      Args.push_back("-action-cache-path");
+      Args.push_back(Ctx.ClangImporterOpts.ActionCachePath);
+    }
+
+    std::vector<StringRef> ArgsRefs(Args.begin(), Args.end());
+    Result = ModuleDependencyInfo::forSwiftInterfaceModule(
+        outputPathBase.str().str(), InPath, compiledCandidates, ArgsRefs, PCMArgs,
+        Hash, isFramework, RootID);
+
     // Walk the source file to find the import declarations.
     llvm::StringSet<> alreadyAddedModules;
     Result->addModuleImport(*sourceFile, alreadyAddedModules);
@@ -171,6 +189,7 @@ ErrorOr<ModuleDependencyInfo> ModuleDependencyScanner::scanInterfaceFile(
     for (auto import: imInfo.AdditionalUnloadedImports) {
       Result->addModuleImport(import.module.getModulePath(), &alreadyAddedModules);
     }
+
     return std::error_code();
   });
 
@@ -195,9 +214,10 @@ Optional<const ModuleDependencyInfo*> SerializedModuleLoaderBase::getModuleDepen
   // FIXME: submodules?
   scanners.push_back(std::make_unique<PlaceholderSwiftModuleScanner>(
       Ctx, LoadMode, moduleId, Ctx.SearchPathOpts.PlaceholderDependencyModuleMap,
-      delegate));
+      delegate, cache.getScanService().getSharedCachingFS().get()));
   scanners.push_back(std::make_unique<ModuleDependencyScanner>(
-      Ctx, LoadMode, moduleId, delegate));
+      Ctx, LoadMode, moduleId, delegate, ModuleDependencyScanner::MDS_plain,
+      cache.getScanService().getSharedCachingFS().get()));
 
   // Check whether there is a module with this name that we can import.
   assert(isa<PlaceholderSwiftModuleScanner>(scanners[0].get()) &&

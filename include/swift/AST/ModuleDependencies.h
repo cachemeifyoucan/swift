@@ -23,6 +23,7 @@
 #include "clang/Tooling/DependencyScanning/DependencyScanningService.h"
 #include "clang/Tooling/DependencyScanning/DependencyScanningTool.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
@@ -531,6 +532,9 @@ public:
 
   /// Get the bridging header.
   Optional<std::string> getBridgingHeader() const;
+
+  /// Get CAS Filesystem RootID.
+  Optional<std::string> getCASFSRootID() const;
 
   /// Add a bridging header to a Swift module's dependencies.
   void addBridgingHeader(StringRef bridgingHeader);
