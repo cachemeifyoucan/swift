@@ -176,8 +176,8 @@ ErrorOr<ModuleDependencyInfo> ModuleDependencyScanner::scanInterfaceFile(
 
     std::vector<StringRef> ArgsRefs(Args.begin(), Args.end());
     Result = ModuleDependencyInfo::forSwiftInterfaceModule(
-        outputPathBase.str().str(), InPath, compiledCandidates, ArgsRefs, PCMArgs,
-        Hash, isFramework, RootID);
+        outputPathBase.str().str(), InPath, compiledCandidates, ArgsRefs,
+        PCMArgs, Hash, isFramework, RootID, /*module-cache-key*/ "");
 
     // Walk the source file to find the import declarations.
     llvm::StringSet<> alreadyAddedModules;

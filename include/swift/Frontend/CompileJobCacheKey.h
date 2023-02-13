@@ -28,14 +28,15 @@ namespace swift {
 
 // TODO: switch to create key from CompilerInvocation after we can canonicalize
 // arguments.
-std::optional<llvm::cas::ObjectRef> createCompileJobBaseCacheKey(
-    llvm::cas::ObjectStore &CAS, DiagnosticEngine &Diags,
-    ArrayRef<const char *> Args, llvm::cas::ObjectRef CASFS);
+llvm::Expected<llvm::cas::ObjectRef>
+createCompileJobBaseCacheKey(llvm::cas::ObjectStore &CAS,
+                             ArrayRef<const char *> Args,
+                             llvm::Optional<llvm::cas::ObjectRef> CASFS);
 
-std::optional<llvm::cas::ObjectRef> createCompileJobCacheKeyForOutput(
-    llvm::cas::ObjectStore &CAS, DiagnosticEngine &Diags,
-    llvm::cas::ObjectRef BaseKey, file_types::ID OutputID);
-
+llvm::Expected<llvm::cas::ObjectRef>
+createCompileJobCacheKeyForOutput(llvm::cas::ObjectStore &CAS,
+                                  llvm::cas::ObjectRef BaseKey,
+                                  StringRef OutputID);
 }
 
 #endif

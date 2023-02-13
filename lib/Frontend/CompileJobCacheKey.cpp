@@ -23,10 +23,9 @@
 using namespace swift;
 
 // TODO: Rewrite this into CASNodeSchema.
-std::optional<llvm::cas::ObjectRef> createCompileJobBaseCacheKey(
-    llvm::cas::ObjectStore &CAS, DiagnosticEngine &Diags,
-    ArrayRef<const char *> Args, llvm::cas::ObjectRef CASFS) {
-  assert(!Args.empty() && StringRef(Args[0]) == "-frontend");
+llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
+    llvm::cas::ObjectStore &CAS, ArrayRef<const char *> Args,
+    llvm::Optional<llvm::cas::ObjectRef> CASFS) {
   SmallString<256> CommandLine;
   for (StringRef Arg : Args) {
     CommandLine.append(Arg);
@@ -46,13 +45,18 @@ std::optional<llvm::cas::ObjectRef> createCompileJobBaseCacheKey(
       llvm::cantFail(CAS.storeFromString(None, version::getSwiftFullVersion())),
       llvm::cas::TreeEntry::Regular, "version");
 
-  Builder.push(CASFS, llvm::cas::TreeEntry::Tree, "filesystem");
+  if (CASFS)
+    Builder.push(*CASFS, llvm::cas::TreeEntry::Tree, "filesystem");
 
-  return llvm::cantFail(Builder.create(CAS)).getRef();
+  if (auto Out = Builder.create(CAS))
+    return Out->getRef();
+  else
+    return Out.takeError();
 }
 
-std::optional<llvm::cas::ObjectRef> createCompileJobCacheKeyForOutput(
-    llvm::cas::ObjectStore &CAS, DiagnosticEngine &Diags,
-    llvm::cas::ObjectRef BaseKey, file_types::ID OutputID) {
-  return llvm::cantFail(CAS.storeFromString({BaseKey}, getTypeName(OutputID)));
+llvm::Expected<llvm::cas::ObjectRef>
+swift::createCompileJobCacheKeyForOutput(llvm::cas::ObjectStore &CAS,
+                                         llvm::cas::ObjectRef BaseKey,
+                                         StringRef OutputID) {
+  return CAS.storeFromString({BaseKey}, OutputID);
 }

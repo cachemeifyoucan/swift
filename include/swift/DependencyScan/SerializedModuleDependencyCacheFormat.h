@@ -140,7 +140,8 @@ using SwiftInterfaceModuleDetailsLayout =
                    FileIDArrayIDField,                  // sourceFiles
                    FileIDArrayIDField,                  // bridgingSourceFiles
                    FileIDArrayIDField,                  // bridgingModuleDependencies
-                   IdentifierIDField                    // CASFileSystemRootID
+                   IdentifierIDField,                   // CASFileSystemRootID
+                   IdentifierIDField                    // moduleCacheKey
                    >;
 
 using SwiftSourceModuleDetailsLayout =
@@ -157,7 +158,8 @@ using SwiftBinaryModuleDetailsLayout =
                    FileIDField,                      // compiledModulePath
                    FileIDField,                      // moduleDocPath
                    FileIDField,                      // moduleSourceInfoPath
-                   IsFrameworkField                  // isFramework
+                   IsFrameworkField,                 // isFramework
+                   IdentifierIDField                 // moduleCacheKey
                    >;
 
 using SwiftPlaceholderModuleDetailsLayout =
@@ -175,7 +177,8 @@ using ClangModuleDetailsLayout =
                    FlagIDArrayIDField,        // commandLine
                    FileIDArrayIDField,        // fileDependencies
                    FlagIDArrayIDField,        // capturedPCMArgs
-                   IdentifierIDField          // CASFileSystemRootID
+                   IdentifierIDField,         // CASFileSystemRootID
+                   IdentifierIDField          // moduleCacheKey
                    >;
 } // namespace graph_block
 

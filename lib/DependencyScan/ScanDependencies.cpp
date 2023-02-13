@@ -12,14 +12,12 @@
 
 #include "swift/Basic/PrettyStackTrace.h"
 
-#include "swift/DependencyScan/ScanDependencies.h"
-#include "swift/DependencyScan/SerializedModuleDependencyCacheFormat.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/Decl.h"
 #include "swift/AST/DiagnosticEngine.h"
+#include "swift/AST/DiagnosticsDriver.h"
 #include "swift/AST/DiagnosticsFrontend.h"
 #include "swift/AST/DiagnosticsSema.h"
-#include "swift/AST/DiagnosticsDriver.h"
 #include "swift/AST/FileSystem.h"
 #include "swift/AST/Module.h"
 #include "swift/AST/ModuleDependencies.h"
@@ -30,19 +28,26 @@
 #include "swift/Basic/STLExtras.h"
 #include "swift/ClangImporter/ClangImporter.h"
 #include "swift/DependencyScan/DependencyScanImpl.h"
+#include "swift/DependencyScan/ScanDependencies.h"
+#include "swift/DependencyScan/SerializedModuleDependencyCacheFormat.h"
 #include "swift/DependencyScan/StringUtils.h"
+#include "swift/Frontend/CompileJobCacheKey.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/Frontend/FrontendOptions.h"
 #include "swift/Frontend/ModuleInterfaceLoader.h"
 #include "swift/Strings.h"
 #include "clang/Basic/Module.h"
-#include "llvm/ADT/SetVector.h"
+#include "clang/Frontend/CompileJobCacheResult.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetOperations.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/CAS/ActionCache.h"
 #include "llvm/CAS/CASReference.h"
 #include "llvm/CAS/HierarchicalTreeBuilder.h"
+#include "llvm/CAS/ObjectStore.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
@@ -50,10 +55,10 @@
 #include "llvm/Support/YAMLParser.h"
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
-#include <set>
-#include <string>
-#include <sstream>
 #include <algorithm>
+#include <set>
+#include <sstream>
+#include <string>
 
 using namespace swift;
 using namespace swift::dependencies;
@@ -251,12 +256,9 @@ computeTransitiveClosureOfExplicitDependencies(
   return result;
 }
 
-static llvm::Expected<std::string>
+static llvm::Expected<llvm::cas::ObjectRef>
 mergeCASFileSystem(llvm::cas::ObjectStore &CAS, ArrayRef<std::string> FSRoots) {
   assert(!FSRoots.empty() && "no root ID provided");
-  // If there is only ID, no need to merge.
-  if (FSRoots.size() == 1)
-    return FSRoots.front();
 
   llvm::cas::HierarchicalTreeBuilder Builder;
   for (auto &Root : FSRoots) {
@@ -273,24 +275,60 @@ mergeCASFileSystem(llvm::cas::ObjectStore &CAS, ArrayRef<std::string> FSRoots) {
   if (!NewRoot)
     return NewRoot.takeError();
 
-  return NewRoot->getID().toString();
+  return NewRoot->getRef();
 }
 
-static llvm::Error
-resolveExplicitModuleInputs(ModuleDependencyID moduleID,
-                            const ModuleDependencyInfo &resolvingDepInfo,
-                            const std::set<ModuleDependencyID> &dependencies,
-                            ModuleDependenciesCache &cache) {
-  auto resolvingInterfaceDepDetails =
-      resolvingDepInfo.getAsSwiftInterfaceModule();
-  assert(resolvingInterfaceDepDetails &&
-         "Expected Swift Interface dependency.");
+static llvm::Expected<llvm::cas::ObjectRef>
+updateModuleCacheKey(ModuleDependencyInfo &depInfo,
+                     llvm::cas::ObjectStore &CAS) {
+  auto commandLine = depInfo.getCommandline();
+  std::vector<const char *> Args;
+  if (commandLine.size() > 1)
+    for (auto &c : ArrayRef<std::string>(commandLine).drop_front(1))
+      Args.push_back(c.c_str());
+
+  // FIXME: Hack, assume PCM args are appended after.
+  if (auto *clangDep = depInfo.getAsClangModule()) {
+    for (auto &A : clangDep->capturedPCMArgs)
+      Args.push_back(A.c_str());
+  }
+
+  llvm::Optional<llvm::cas::ObjectRef> rootID;
+  if (auto ID = depInfo.getCASFSRootID()) {
+    auto CASID = CAS.parseID(*ID);
+    if (!CASID)
+      return CASID.takeError();
+    rootID = CAS.getReference(*CASID);
+  }
+
+  auto base = createCompileJobBaseCacheKey(CAS, Args, rootID);
+  if (!base)
+    return base.takeError();
+
+  auto key = createCompileJobCacheKeyForOutput(CAS, *base,
+                                               depInfo.getModuleOutputPath());
+  if (!key)
+    return key.takeError();
+
+  depInfo.updateModuleCacheKey(CAS.getID(*key).toString());
+  return *key;
+}
+
+static llvm::Error resolveExplicitModuleInputs(
+    ModuleDependencyID moduleID, const ModuleDependencyInfo &resolvingDepInfo,
+    const std::set<ModuleDependencyID> &dependencies,
+    ModuleDependenciesCache &cache, CompilerInstance &instance) {
+  // Only need to resolve dependency for following dependencies.
+  if (moduleID.second != ModuleDependencyKind::Clang &&
+      moduleID.second != ModuleDependencyKind::SwiftBinary &&
+      moduleID.second != ModuleDependencyKind::SwiftInterface)
+    return llvm::Error::success();
 
   std::vector<std::string> rootIDs;
   if (auto ID = resolvingDepInfo.getCASFSRootID())
     rootIDs.push_back(*ID);
 
-  auto commandLine = resolvingInterfaceDepDetails->buildCommandLine;
+  std::vector<std::string> commandLine = resolvingDepInfo.getCommandline();
   for (const auto &depModuleID : dependencies) {
     const auto optionalDepInfo =
         cache.findDependency(depModuleID.first, depModuleID.second);
@@ -300,14 +338,20 @@ resolveExplicitModuleInputs(ModuleDependencyID moduleID,
     case swift::ModuleDependencyKind::SwiftInterface: {
       auto interfaceDepDetails = depInfo->getAsSwiftInterfaceModule();
       assert(interfaceDepDetails && "Expected Swift Interface dependency.");
+      auto &path = interfaceDepDetails->moduleCacheKey.empty()
+                       ? interfaceDepDetails->moduleOutputPath
+                       : interfaceDepDetails->moduleCacheKey;
       commandLine.push_back("-swift-module-file=" + depModuleID.first + "=" +
-                            interfaceDepDetails->moduleOutputPath);
+                            path);
     } break;
     case swift::ModuleDependencyKind::SwiftBinary: {
       auto binaryDepDetails = depInfo->getAsSwiftBinaryModule();
       assert(binaryDepDetails && "Expected Swift Binary Module dependency.");
+      auto &path = binaryDepDetails->moduleCacheKey.empty()
+                       ? binaryDepDetails->compiledModulePath
+                       : binaryDepDetails->moduleCacheKey;
       commandLine.push_back("-swift-module-file=" + depModuleID.first + "=" +
-                            binaryDepDetails->compiledModulePath);
+                            path);
     } break;
     case swift::ModuleDependencyKind::SwiftPlaceholder: {
       auto placeholderDetails = depInfo->getAsPlaceholderDependencyModule();
@@ -324,6 +368,19 @@ resolveExplicitModuleInputs(ModuleDependencyID moduleID,
       commandLine.push_back("-Xcc");
       commandLine.push_back("-fmodule-map-file=" +
                             clangDepDetails->moduleMapFile);
+      if (!clangDepDetails->moduleCacheKey.empty()) {
+        if (resolvingDepInfo.isSwiftInterfaceModule()) {
+          // This is only needed for building swift interface, which uses driver
+          // flag.
+          commandLine.push_back("-Xcc");
+          commandLine.push_back("-Xclang");
+        }
+        commandLine.push_back("-Xcc");
+        commandLine.push_back(
+            "-fmodule-file-cache-key=" + clangDepDetails->pcmOutputPath + "=" +
+            clangDepDetails->moduleCacheKey);
+      }
+
       // Only need to merge the CASFS from clang importer.
       if (auto ID = depInfo->getCASFSRootID())
         rootIDs.push_back(*ID);
@@ -335,17 +392,59 @@ resolveExplicitModuleInputs(ModuleDependencyID moduleID,
 
   // Update the dependency in the cache with the modified command-line.
   auto dependencyInfoCopy = resolvingDepInfo;
-  if (!rootIDs.empty()) {
+  if (resolvingDepInfo.isSwiftInterfaceModule() ||
+      resolvingDepInfo.isClangModule())
+    dependencyInfoCopy.updateCommandLine(commandLine);
+
+  // Handle CAS options.
+  if (instance.getInvocation().getFrontendOptions().EnableCAS) {
+    // Merge CASFS from clang dependency.
     auto CASFS = cache.getScanService().getSharedCachingFS();
     assert(CASFS && "Expect CASFS");
-    auto NewRoot = mergeCASFileSystem(CASFS->getCAS(), rootIDs);
-    if (!NewRoot)
-      return NewRoot.takeError();
-    dependencyInfoCopy.updateCASFileSystemID(*NewRoot);
-    commandLine.push_back("-cas-fs");
-    commandLine.push_back(*NewRoot);
+    auto &CAS = CASFS->getCAS();
+
+    // Update CASFS RootID for interface dependency.
+    if (resolvingDepInfo.isSwiftInterfaceModule()) {
+      auto NewRoot = mergeCASFileSystem(CAS, rootIDs);
+      if (!NewRoot)
+        return NewRoot.takeError();
+      auto NewID = CAS.getID(*NewRoot).toString();
+      dependencyInfoCopy.updateCASFileSystemID(NewID);
+
+      // Update with casfs option.
+      commandLine.push_back("-cas-fs");
+      commandLine.push_back(NewID);
+      dependencyInfoCopy.updateCommandLine(commandLine);
+    }
+
+    if (resolvingDepInfo.isClangModule() ||
+        resolvingDepInfo.isSwiftBinaryModule() ||
+        resolvingDepInfo.isSwiftInterfaceModule()) {
+      // Compute and update module cache key.
+      auto Key = updateModuleCacheKey(dependencyInfoCopy, CAS);
+      if (!Key)
+        return Key.takeError();
+
+      // For binary module, we need to make sure the lookup key is setup here in
+      // action cache.
+      if (auto *binaryDep = dependencyInfoCopy.getAsSwiftBinaryModule()) {
+        auto Ref =
+            CASFS->getObjectRefForFileContent(binaryDep->compiledModulePath);
+        if (!Ref)
+          return llvm::errorCodeToError(Ref.getError());
+        assert(*Ref && "Binary module should be loaded into CASFS already");
+        clang::cas::CompileJobCacheResult::Builder Builder;
+        Builder.addOutput(
+            clang::cas::CompileJobCacheResult::OutputKind::MainOutput, **Ref);
+        auto Result = Builder.build(CAS);
+        if (!Result)
+          return Result.takeError();
+        if (auto E = instance.getActionCache().put(CAS.getID(*Key),
+                                                   CAS.getID(*Result)))
+          return E;
+      }
+    }
   }
-  dependencyInfoCopy.updateCommandLine(commandLine);
   cache.updateDependency(moduleID, dependencyInfoCopy);
 
   return llvm::Error::success();
@@ -873,6 +972,11 @@ static void writeJSON(llvm::raw_ostream &out,
                              swiftTextualDeps->cas_fs_root_id, 5,
                              /*trailingComma=*/true);
       }
+      if (swiftTextualDeps->module_cache_key.length != 0) {
+        writeJSONSingleField(out, "moduleCacheKey",
+                             swiftTextualDeps->module_cache_key, 5,
+                             /*trailingComma=*/true);
+      }
       writeJSONSingleField(out, "isFramework", swiftTextualDeps->is_framework,
                            5, commaAfterFramework);
       if (swiftTextualDeps->extra_pcm_args->count != 0) {
@@ -952,6 +1056,11 @@ static void writeJSON(llvm::raw_ostream &out,
                              swiftBinaryDeps->module_source_info_path,
                              /*indentLevel=*/5,
                              /*trailingComma=*/true);
+      if (swiftBinaryDeps->module_cache_key.length != 0) {
+        writeJSONSingleField(out, "moduleCacheKey",
+                             swiftBinaryDeps->module_cache_key, 5,
+                             /*trailingComma=*/true);
+      }
       writeJSONSingleField(out, "isFramework", swiftBinaryDeps->is_framework,
                            5, /*trailingComma=*/false);
     } else {
@@ -971,6 +1080,10 @@ static void writeJSON(llvm::raw_ostream &out,
 
       if (clangDeps->cas_fs_root_id.length != 0)
         writeJSONSingleField(out, "casFSRootID", clangDeps->cas_fs_root_id, 5,
+                             /*trailingComma=*/true);
+      if (clangDeps->module_cache_key.length != 0)
+        writeJSONSingleField(out, "moduleCacheKey", clangDeps->module_cache_key,
+                             5,
                              /*trailingComma=*/true);
 
       // Captured PCM arguments.
@@ -1076,7 +1189,8 @@ generateFullDependencyGraph(CompilerInstance &instance,
             create_set(swiftTextualDeps->textualModuleDetails.extraPCMArgs),
             create_clone(swiftTextualDeps->contextHash.c_str()),
             swiftTextualDeps->isFramework,
-            create_clone(swiftTextualDeps->CASFileSystemRootID.c_str())};
+            create_clone(swiftTextualDeps->CASFileSystemRootID.c_str()),
+            create_clone(swiftTextualDeps->moduleCacheKey.c_str())};
       } else if (swiftSourceDeps) {
         swiftscan_string_ref_t moduleInterfacePath = create_null();
         swiftscan_string_ref_t bridgingHeaderPath =
@@ -1097,7 +1211,7 @@ generateFullDependencyGraph(CompilerInstance &instance,
             create_set(swiftSourceDeps->textualModuleDetails.extraPCMArgs),
             /*contextHash*/create_null(),
             /*isFramework*/false,
-            create_clone("")};
+            /*CASFS*/create_clone(""), /*CacheKey*/create_clone("")};
       } else if (swiftPlaceholderDeps) {
         details->kind = SWIFTSCAN_DEPENDENCY_INFO_SWIFT_PLACEHOLDER;
         details->swift_placeholder_details = {
@@ -1110,7 +1224,8 @@ generateFullDependencyGraph(CompilerInstance &instance,
             create_clone(swiftBinaryDeps->compiledModulePath.c_str()),
             create_clone(swiftBinaryDeps->moduleDocPath.c_str()),
             create_clone(swiftBinaryDeps->sourceInfoPath.c_str()),
-            swiftBinaryDeps->isFramework};
+            swiftBinaryDeps->isFramework,
+            create_clone(swiftBinaryDeps->moduleCacheKey.c_str())};
       } else {
         // Clang module details
         details->kind = SWIFTSCAN_DEPENDENCY_INFO_CLANG;
@@ -1119,7 +1234,8 @@ generateFullDependencyGraph(CompilerInstance &instance,
             create_clone(clangDeps->contextHash.c_str()),
             create_set(clangDeps->nonPathCommandLine),
             create_set(clangDeps->capturedPCMArgs),
-            create_clone(clangDeps->CASFileSystemRootID.c_str())
+            create_clone(clangDeps->CASFileSystemRootID.c_str()),
+            create_clone(clangDeps->moduleCacheKey.c_str())
         };
       }
       return details;
@@ -1703,18 +1819,16 @@ swift::dependencies::performModuleScan(CompilerInstance &instance,
   auto moduleTransitiveClosures =
       computeTransitiveClosureOfExplicitDependencies(topoSortedModuleList,
                                                      cache);
-  for (const auto &dependencyClosure : moduleTransitiveClosures) {
-    auto &modID = dependencyClosure.first;
+  for (const auto &modID : llvm::reverse(topoSortedModuleList)) {
+    auto dependencyClosure = moduleTransitiveClosures[modID];
     // For main module or binary modules, no command-line to resolve.
     // For Clang modules, their dependencies are resolved by the clang Scanner
     // itself for us.
-    if (modID.second != ModuleDependencyKind::SwiftInterface)
-      continue;
     auto optionalDeps = cache.findDependency(modID.first, modID.second);
     assert(optionalDeps.has_value());
     auto deps = optionalDeps.value();
-    if (auto E = resolveExplicitModuleInputs(modID, *deps,
-                                             dependencyClosure.second, cache))
+    if (auto E = resolveExplicitModuleInputs(modID, *deps, dependencyClosure,
+                                             cache, instance))
       instance.getDiags().diagnose(SourceLoc(), diag::error_cas,
                                    toString(std::move(E)));
   }

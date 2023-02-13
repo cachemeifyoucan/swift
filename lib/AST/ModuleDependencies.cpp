@@ -175,6 +175,35 @@ Optional<std::string> ModuleDependencyInfo::getCASFSRootID() const {
   }
 }
 
+std::string ModuleDependencyInfo::getModuleOutputPath() const {
+  switch (getKind()) {
+  case swift::ModuleDependencyKind::SwiftInterface: {
+    auto swiftInterfaceStorage =
+        cast<SwiftInterfaceModuleDependenciesStorage>(storage.get());
+    return swiftInterfaceStorage->moduleOutputPath;
+  }
+  case swift::ModuleDependencyKind::SwiftSource: {
+    return "<swiftmodule>";
+  }
+  case swift::ModuleDependencyKind::Clang: {
+    auto clangModuleStorage = cast<ClangModuleDependencyStorage>(storage.get());
+    return clangModuleStorage->pcmOutputPath;
+  }
+  case swift::ModuleDependencyKind::SwiftBinary: {
+    auto swiftBinaryStorage =
+        cast<SwiftBinaryModuleDependencyStorage>(storage.get());
+    return swiftBinaryStorage->compiledModulePath;
+  }
+  case swift::ModuleDependencyKind::SwiftPlaceholder: {
+    auto swiftPlaceholderStorage =
+        cast<SwiftPlaceholderModuleDependencyStorage>(storage.get());
+    return swiftPlaceholderStorage->compiledModulePath;
+  }
+  default:
+    llvm_unreachable("Unexpected dependency kind");
+  }
+}
+
 void ModuleDependencyInfo::addBridgingHeader(StringRef bridgingHeader) {
   switch (getKind()) {
   case swift::ModuleDependencyKind::SwiftInterface: {
@@ -418,7 +447,7 @@ ModuleDependenciesCache::ModuleDependenciesCache(
       mainScanModuleName(mainScanModuleName),
       scannerContextHash(scannerContextHash),
       clangScanningTool(*globalScanningService.ClangScanningService,
-                        globalScanningService.CacheFS->createProxyFS()) {
+                        globalScanningService.getClangScanningFS()) {
   globalScanningService.configureForContextHash(scannerContextHash);
   for (auto kind = ModuleDependencyKind::FirstKind;
        kind != ModuleDependencyKind::LastKind; ++kind) {

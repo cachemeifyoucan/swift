@@ -26,6 +26,7 @@
 #include "swift/Basic/FileTypes.h"
 #include "swift/Basic/SourceManager.h"
 #include "swift/Basic/Statistic.h"
+#include "swift/Frontend/CompileJobCacheKey.h"
 #include "swift/Frontend/ModuleInterfaceLoader.h"
 #include "swift/Parse/Lexer.h"
 #include "swift/SIL/SILModule.h"
@@ -43,6 +44,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/CAS/ActionCache.h"
 #include "llvm/CAS/CASFileSystem.h"
+#include "llvm/CAS/CASReference.h"
 #include "llvm/CAS/ObjectStore.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
@@ -51,6 +53,8 @@
 #include "llvm/Support/Process.h"
 #include "llvm/Support/VirtualOutputBackends.h"
 #include <llvm/ADT/StringExtras.h>
+
+#include "CachingUtils.h"
 
 using namespace swift;
 
@@ -399,7 +403,7 @@ void CompilerInstance::setupDependencyTrackerIfNeeded() {
     DepTracker->addDependency(path, /*isSystem=*/false);
 }
 
-bool CompilerInstance::setupCASIfNeeded() {
+bool CompilerInstance::setupCASIfNeeded(ArrayRef<const char *> Args) {
   const auto &Opts = getInvocation().getFrontendOptions();
   if (!Opts.EnableCAS)
     return false;
@@ -418,6 +422,31 @@ bool CompilerInstance::setupCASIfNeeded() {
     return true;
   }
 
+  // create baseline key.
+  llvm::Optional<llvm::cas::ObjectRef> FSRef;
+  if (!Opts.CASFSRootID.empty()) {
+    auto CASFSID = CAS->parseID(Opts.CASFSRootID);
+    if (!CASFSID) {
+      Diagnostics.diagnose(SourceLoc(), diag::error_cas,
+                           toString(CASFSID.takeError()));
+      return true;
+    }
+    FSRef = CAS->getReference(*CASFSID);
+    if (!FSRef) {
+      Diagnostics.diagnose(SourceLoc(), diag::error_cas,
+                           "-cas-fs value does not exist in CAS");
+      return true;
+    }
+  }
+
+  auto BaseKey = createCompileJobBaseCacheKey(*CAS, Args, FSRef);
+  if (!BaseKey) {
+    Diagnostics.diagnose(SourceLoc(), diag::error_cas,
+                         toString(BaseKey.takeError()));
+    return true;
+  }
+  BaseRef = *BaseKey;
+
   return false;
 }
 
@@ -428,6 +457,15 @@ void CompilerInstance::setupOutputBackend() {
 
   TheOutputBackend =
       llvm::makeIntrusiveRefCnt<llvm::vfs::OnDiskOutputBackend>();
+
+  // Mirror the output into CAS.
+  if (Invocation.getFrontendOptions().EnableCAS) {
+    auto CASOutputBackend = createSwiftCachingOutputBackend(
+        *CAS, *Cache, *BaseRef,
+        Invocation.getFrontendOptions().InputsAndOutputs);
+    TheOutputBackend = llvm::vfs::makeMirroringOutputBackend(TheOutputBackend,
+                                                             CASOutputBackend);
+  }
 
   // Setup verification backend.
   // Create a mirroring outputbackend to produce hash for output files.
@@ -441,10 +479,10 @@ void CompilerInstance::setupOutputBackend() {
 }
 
 bool CompilerInstance::setup(const CompilerInvocation &Invoke,
-                             std::string &Error) {
+                             std::string &Error, ArrayRef<const char *> Args) {
   Invocation = Invoke;
 
-  if (setupCASIfNeeded()) {
+  if (setupCASIfNeeded(Args)) {
     Error = "Setting up CAS failed";
     return true;
   }
@@ -635,17 +673,24 @@ bool CompilerInstance::setUpModuleLoaders() {
   // If using `-explicit-swift-module-map-file`, create the explicit loader
   // before creating `ClangImporter` because the entries in the map influence
   // the Clang flags. The loader is added to the context below.
-  std::unique_ptr<ExplicitSwiftModuleLoader> ESML = nullptr;
+  std::unique_ptr<SerializedModuleLoaderBase> ESML = nullptr;
   bool ExplicitModuleBuild =
       Invocation.getFrontendOptions().DisableImplicitModules;
   if (ExplicitModuleBuild ||
       !Invocation.getSearchPathOptions().ExplicitSwiftModuleMap.empty() ||
       !Invocation.getSearchPathOptions().ExplicitSwiftModuleInputs.empty()) {
-    ESML = ExplicitSwiftModuleLoader::create(
-        *Context, getDependencyTracker(), MLM,
-        Invocation.getSearchPathOptions().ExplicitSwiftModuleMap,
-        Invocation.getSearchPathOptions().ExplicitSwiftModuleInputs,
-        IgnoreSourceInfoFile);
+    if (Invocation.getFrontendOptions().EnableCAS)
+      ESML = ExplicitCASModuleLoader::create(
+          *Context, getObjectStore(), getActionCache(), getDependencyTracker(),
+          MLM, Invocation.getSearchPathOptions().ExplicitSwiftModuleMap,
+          Invocation.getSearchPathOptions().ExplicitSwiftModuleInputs,
+          IgnoreSourceInfoFile);
+    else
+      ESML = ExplicitSwiftModuleLoader::create(
+          *Context, getDependencyTracker(), MLM,
+          Invocation.getSearchPathOptions().ExplicitSwiftModuleMap,
+          Invocation.getSearchPathOptions().ExplicitSwiftModuleInputs,
+          IgnoreSourceInfoFile);
   }
 
   // Wire up the Clang importer. If the user has specified an SDK, use it.

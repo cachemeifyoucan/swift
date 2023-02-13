@@ -114,6 +114,13 @@
 #include "llvm/Support/StringSaver.h"
 #include "llvm/Support/YAMLTraits.h"
 
+namespace llvm {
+namespace cas {
+class ObjectStore;
+class ActionCache;
+} // namespace cas
+} // namespace llvm
+
 namespace clang {
 class CompilerInstance;
 }
@@ -176,6 +183,55 @@ public:
   ~ExplicitSwiftModuleLoader();
 };
 
+class ExplicitCASModuleLoader : public SerializedModuleLoaderBase {
+  explicit ExplicitCASModuleLoader(ASTContext &ctx, llvm::cas::ObjectStore &CAS,
+                                   llvm::cas::ActionCache &cache,
+                                   DependencyTracker *tracker,
+                                   ModuleLoadingMode loadMode,
+                                   bool IgnoreSwiftSourceInfoFile);
+
+  bool findModule(ImportPath::Element moduleID,
+                  SmallVectorImpl<char> *moduleInterfacePath,
+                  SmallVectorImpl<char> *moduleInterfaceSourcePath,
+                  std::unique_ptr<llvm::MemoryBuffer> *moduleBuffer,
+                  std::unique_ptr<llvm::MemoryBuffer> *moduleDocBuffer,
+                  std::unique_ptr<llvm::MemoryBuffer> *moduleSourceInfoBuffer,
+                  bool skipBuildingInterface, bool &isFramework,
+                  bool &isSystemModule) override;
+
+  std::error_code findModuleFilesInDirectory(
+      ImportPath::Element ModuleID, const SerializedModuleBaseName &BaseName,
+      SmallVectorImpl<char> *ModuleInterfacePath,
+      SmallVectorImpl<char> *moduleInterfaceSourcePath,
+      std::unique_ptr<llvm::MemoryBuffer> *ModuleBuffer,
+      std::unique_ptr<llvm::MemoryBuffer> *ModuleDocBuffer,
+      std::unique_ptr<llvm::MemoryBuffer> *ModuleSourceInfoBuffer,
+      bool skipBuildingInterface, bool IsFramework) override;
+
+  bool canImportModule(ImportPath::Module named,
+                       ModuleVersionInfo *versionInfo) override;
+
+  bool isCached(StringRef DepPath) override { return false; };
+
+  struct Implementation;
+  Implementation &Impl;
+
+public:
+  static std::unique_ptr<ExplicitCASModuleLoader>
+  create(ASTContext &ctx, llvm::cas::ObjectStore &CAS,
+         llvm::cas::ActionCache &cache, DependencyTracker *tracker,
+         ModuleLoadingMode loadMode, StringRef ExplicitSwiftModuleMap,
+         const std::vector<std::pair<std::string, std::string>>
+             &ExplicitSwiftModuleInputs,
+         bool IgnoreSwiftSourceInfoFile);
+
+  /// Append visible module names to \p names. Note that names are possibly
+  /// duplicated, and not guaranteed to be ordered in any way.
+  void collectVisibleTopLevelModuleNames(
+      SmallVectorImpl<Identifier> &names) const override;
+
+  ~ExplicitCASModuleLoader();
+};
 
 // Explicitly-specified Swift module inputs
 struct ExplicitSwiftModuleInputInfo {

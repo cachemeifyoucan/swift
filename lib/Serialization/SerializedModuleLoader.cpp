@@ -410,10 +410,9 @@ llvm::ErrorOr<ModuleDependencyInfo> SerializedModuleLoaderBase::scanModuleFile(
   const std::string moduleDocPath;
   const std::string sourceInfoPath;
   // Map the set of dependencies over to the "module dependencies".
-  auto dependencies = ModuleDependencyInfo::forSwiftBinaryModule(modulePath.str(),
-                                                               moduleDocPath,
-                                                               sourceInfoPath,
-                                                               isFramework);
+  auto dependencies = ModuleDependencyInfo::forSwiftBinaryModule(
+      modulePath.str(), moduleDocPath, sourceInfoPath, isFramework,
+      /*module-cache-key*/ "");
   llvm::StringSet<> addedModuleNames;
   for (const auto &dependency : loadedModuleFile->getDependencies()) {
     // FIXME: Record header dependency?

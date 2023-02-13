@@ -196,13 +196,9 @@ void ClangImporter::recordModuleDependencies(
     // Module-level dependencies.
     llvm::StringSet<> alreadyAddedModules;
     auto dependencies = ModuleDependencyInfo::forClangModule(
-        pcmPath,
-        clangModuleDep.ClangModuleMapFile,
-        clangModuleDep.ID.ContextHash,
-        swiftArgs,
-        fileDeps,
-        capturedPCMArgs,
-        RootID);
+        pcmPath, clangModuleDep.ClangModuleMapFile,
+        clangModuleDep.ID.ContextHash, swiftArgs, fileDeps, capturedPCMArgs,
+        RootID, /*module-cache-key*/ "");
     for (const auto &moduleName : clangModuleDep.ClangModuleDeps) {
       dependencies.addModuleImport(moduleName.ModuleName, &alreadyAddedModules);
       // It is safe to assume that all dependencies of a Clang module are Clang modules.

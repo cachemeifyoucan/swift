@@ -28,6 +28,7 @@
 #include "llvm/ADT/StringSet.h"
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/Support/Mutex.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -167,6 +168,9 @@ public:
   /// CASID for the Root of CASFS. Empty if CAS is not used.
   std::string CASFileSystemRootID;
 
+  /// The cache key for the produced module.
+  std::string moduleCacheKey;
+
   SwiftInterfaceModuleDependenciesStorage(
       const std::string moduleOutputPath,
       const std::string swiftInterfaceFile,
@@ -175,7 +179,8 @@ public:
       ArrayRef<StringRef> extraPCMArgs,
       StringRef contextHash,
       bool isFramework,
-      const std::string RootID
+      const std::string RootID,
+      const std::string ModuleCacheKey
   ) : ModuleDependencyInfoStorageBase(ModuleDependencyKind::SwiftInterface),
       moduleOutputPath(moduleOutputPath),
       swiftInterfaceFile(swiftInterfaceFile),
@@ -183,7 +188,8 @@ public:
                                compiledModuleCandidates.end()),
       buildCommandLine(buildCommandLine.begin(), buildCommandLine.end()),
       contextHash(contextHash), isFramework(isFramework),
-      textualModuleDetails(extraPCMArgs), CASFileSystemRootID(RootID)
+      textualModuleDetails(extraPCMArgs), CASFileSystemRootID(RootID),
+      moduleCacheKey(ModuleCacheKey)
       {}
 
   ModuleDependencyInfoStorageBase *clone() const override {
@@ -200,6 +206,10 @@ public:
 
   void updateCASFileSystemID(const std::string &ID) {
     CASFileSystemRootID = ID;
+  }
+
+  void updateModuleCacheKey(const std::string &Key) {
+    moduleCacheKey = Key;
   }
 };
 
@@ -238,12 +248,12 @@ public:
   SwiftBinaryModuleDependencyStorage(const std::string &compiledModulePath,
                                      const std::string &moduleDocPath,
                                      const std::string &sourceInfoPath,
-                                     const bool isFramework)
+                                     const bool isFramework,
+                                     const std::string ModuleCacheKey)
       : ModuleDependencyInfoStorageBase(ModuleDependencyKind::SwiftBinary),
-        compiledModulePath(compiledModulePath),
-        moduleDocPath(moduleDocPath),
-        sourceInfoPath(sourceInfoPath),
-        isFramework(isFramework) {}
+        compiledModulePath(compiledModulePath), moduleDocPath(moduleDocPath),
+        sourceInfoPath(sourceInfoPath), isFramework(isFramework),
+        moduleCacheKey(ModuleCacheKey) {}
 
   ModuleDependencyInfoStorageBase *clone() const override {
     return new SwiftBinaryModuleDependencyStorage(*this);
@@ -261,8 +271,15 @@ public:
   /// A flag that indicates this dependency is a framework
   const bool isFramework;
 
+  /// The cache key for the produced module.
+  std::string moduleCacheKey;
+
   static bool classof(const ModuleDependencyInfoStorageBase *base) {
     return base->dependencyKind == ModuleDependencyKind::SwiftBinary;
+  }
+
+  void updateModuleCacheKey(const std::string &Key) {
+    moduleCacheKey = Key;
   }
 };
 
@@ -281,7 +298,7 @@ public:
   const std::string contextHash;
 
   /// Partial (Clang) command line that can be used to build this module.
-  const std::vector<std::string> nonPathCommandLine;
+  std::vector<std::string> nonPathCommandLine;
 
   /// The file dependencies
   const std::vector<std::string> fileDependencies;
@@ -291,7 +308,10 @@ public:
   const std::vector<std::string> capturedPCMArgs;
 
   /// CASID for the Root of CASFS. Empty if CAS is not used.
-  const std::string CASFileSystemRootID;
+  std::string CASFileSystemRootID;
+
+  /// The cache key for the produced module.
+  std::string moduleCacheKey;
 
   ClangModuleDependencyStorage(
       const std::string &pcmOutputPath,
@@ -300,7 +320,8 @@ public:
       const std::vector<std::string> &nonPathCommandLine,
       const std::vector<std::string> &fileDependencies,
       const std::vector<std::string> &capturedPCMArgs,
-      const std::string &CASFileSystemRootID
+      const std::string &CASFileSystemRootID,
+      const std::string ModuleCacheKey
   ) : ModuleDependencyInfoStorageBase(ModuleDependencyKind::Clang),
       pcmOutputPath(pcmOutputPath),
       moduleMapFile(moduleMapFile),
@@ -308,7 +329,8 @@ public:
       nonPathCommandLine(nonPathCommandLine),
       fileDependencies(fileDependencies),
       capturedPCMArgs(capturedPCMArgs),
-      CASFileSystemRootID(CASFileSystemRootID) {}
+      CASFileSystemRootID(CASFileSystemRootID),
+      moduleCacheKey(ModuleCacheKey) {}
 
   ModuleDependencyInfoStorageBase *clone() const override {
     return new ClangModuleDependencyStorage(*this);
@@ -316,6 +338,15 @@ public:
 
   static bool classof(const ModuleDependencyInfoStorageBase *base) {
     return base->dependencyKind == ModuleDependencyKind::Clang;
+  }
+
+  void updateCommandLine(const std::vector<std::string> &newCommandLine) {
+    nonPathCommandLine = newCommandLine;
+  }
+
+  void updateModuleCacheKey(const std::string &Key) {
+    assert(moduleCacheKey.empty());
+    moduleCacheKey = Key;
   }
 };
 
@@ -379,29 +410,32 @@ public:
 
   /// Describe the module dependencies for a Swift module that can be
   /// built from a Swift interface file (\c .swiftinterface).
-  static ModuleDependencyInfo forSwiftInterfaceModule(
-      const std::string &moduleOutputPath,
-      const std::string &swiftInterfaceFile,
-      ArrayRef<std::string> compiledCandidates,
-      ArrayRef<StringRef> buildCommands,
-      ArrayRef<StringRef> extraPCMArgs,
-      StringRef contextHash,
-      bool isFramework, const std::string CASFileSystemRootID) {
+  static ModuleDependencyInfo
+  forSwiftInterfaceModule(const std::string &moduleOutputPath,
+                          const std::string &swiftInterfaceFile,
+                          ArrayRef<std::string> compiledCandidates,
+                          ArrayRef<StringRef> buildCommands,
+                          ArrayRef<StringRef> extraPCMArgs,
+                          StringRef contextHash, bool isFramework,
+                          const std::string &CASFileSystemRootID,
+                          const std::string &moduleCacheKey) {
     return ModuleDependencyInfo(
         std::make_unique<SwiftInterfaceModuleDependenciesStorage>(
-          moduleOutputPath, swiftInterfaceFile, compiledCandidates, buildCommands,
-          extraPCMArgs, contextHash, isFramework, CASFileSystemRootID));
+            moduleOutputPath, swiftInterfaceFile, compiledCandidates,
+            buildCommands, extraPCMArgs, contextHash, isFramework,
+            CASFileSystemRootID, moduleCacheKey));
   }
 
   /// Describe the module dependencies for a serialized or parsed Swift module.
-  static ModuleDependencyInfo forSwiftBinaryModule(
-      const std::string &compiledModulePath,
-      const std::string &moduleDocPath,
-      const std::string &sourceInfoPath,
-      bool isFramework) {
+  static ModuleDependencyInfo
+  forSwiftBinaryModule(const std::string &compiledModulePath,
+                       const std::string &moduleDocPath,
+                       const std::string &sourceInfoPath, bool isFramework,
+                       const std::string &moduleCacheKey) {
     return ModuleDependencyInfo(
         std::make_unique<SwiftBinaryModuleDependencyStorage>(
-          compiledModulePath, moduleDocPath, sourceInfoPath, isFramework));
+            compiledModulePath, moduleDocPath, sourceInfoPath, isFramework,
+            moduleCacheKey));
   }
 
   /// Describe the main Swift module.
@@ -419,12 +453,13 @@ public:
       const std::vector<std::string> &nonPathCommandLine,
       const std::vector<std::string> &fileDependencies,
       const std::vector<std::string> &capturedPCMArgs,
-      const std::string &CASFileSystemRootID) {
+      const std::string &CASFileSystemRootID,
+      const std::string &moduleCacheKey) {
     return ModuleDependencyInfo(
         std::make_unique<ClangModuleDependencyStorage>(
           pcmOutputPath, moduleMapFile, contextHash,
           nonPathCommandLine, fileDependencies, capturedPCMArgs,
-          CASFileSystemRootID));
+          CASFileSystemRootID, moduleCacheKey));
   }
 
   /// Describe a placeholder dependency swift module.
@@ -448,6 +483,32 @@ public:
     return storage->resolvedModuleDependencies;
   }
 
+  std::string getModuleCacheKey() const {
+    assert(storage->resolved);
+    if (auto *dep = getAsSwiftInterfaceModule())
+      return dep->moduleCacheKey;
+    else if (auto *dep = getAsSwiftBinaryModule())
+      return dep->moduleCacheKey;
+    else if (auto *dep = getAsClangModule())
+      return dep->moduleCacheKey;
+
+    llvm_unreachable("Unexpected type");
+  }
+
+  void updateModuleCacheKey(const std::string &key) {
+    if (isSwiftInterfaceModule())
+      return cast<SwiftInterfaceModuleDependenciesStorage>(storage.get())
+          ->updateModuleCacheKey(key);
+    else if (isSwiftBinaryModule())
+      return cast<SwiftBinaryModuleDependencyStorage>(storage.get())
+          ->updateModuleCacheKey(key);
+    else if (isClangModule())
+      return cast<ClangModuleDependencyStorage>(storage.get())
+          ->updateModuleCacheKey(key);
+
+    llvm_unreachable("Unexpected type");
+  }
+
   /// Resolve a dependency's set of `imports` with qualified Module IDs
   void resolveDependencies(const std::vector<ModuleDependencyID> &dependencyIDs) {
     assert(!storage->resolved && "Resolving an already-resolved dependency");
@@ -455,9 +516,22 @@ public:
     storage->resolvedModuleDependencies.assign(dependencyIDs.begin(), dependencyIDs.end());
   }
 
+  std::vector<std::string> getCommandline() const {
+    if (auto *detail = getAsClangModule())
+      return detail->nonPathCommandLine;
+    else if (auto *detail = getAsSwiftInterfaceModule())
+      return detail->buildCommandLine;
+    return {};
+  }
+
   void updateCommandLine(const std::vector<std::string> &newCommandLine) {
-    assert(isSwiftInterfaceModule() && "Can only update command line on Swift interface dependency");
-    cast<SwiftInterfaceModuleDependenciesStorage>(storage.get())->updateCommandLine(newCommandLine);
+    if (isSwiftInterfaceModule())
+      return cast<SwiftInterfaceModuleDependenciesStorage>(storage.get())
+          ->updateCommandLine(newCommandLine);
+    else if (isClangModule())
+      return cast<ClangModuleDependencyStorage>(storage.get())
+          ->updateCommandLine(newCommandLine);
+    llvm_unreachable("Unexpected type");
   }
 
   void updateCASFileSystemID(const std::string &ID) {
@@ -535,6 +609,9 @@ public:
 
   /// Get CAS Filesystem RootID.
   Optional<std::string> getCASFSRootID() const;
+
+  /// Get module output path.
+  std::string getModuleOutputPath() const;
 
   /// Add a bridging header to a Swift module's dependencies.
   void addBridgingHeader(StringRef bridgingHeader);
@@ -647,6 +724,13 @@ public:
   llvm::cas::CachingOnDiskFileSystem &getSharedCachingFS() const {
     assert(CacheFS && "Expect CachingOnDiskFileSystem");
     return *CacheFS;
+  }
+
+  llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> getClangScanningFS() const {
+    if (CacheFS)
+      return CacheFS->createProxyFS();
+
+    return llvm::vfs::createPhysicalFileSystem();
   }
 
   /// Wrap the filesystem on the specified `CompilerInstance` with a
