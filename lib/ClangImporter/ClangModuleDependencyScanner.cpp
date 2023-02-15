@@ -18,11 +18,16 @@
 #include "swift/AST/ModuleDependencies.h"
 #include "swift/Basic/SourceManager.h"
 #include "swift/ClangImporter/ClangImporter.h"
+#include "clang/Basic/Diagnostic.h"
+#include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Tooling/DependencyScanning/DependencyScanningService.h"
 #include "clang/Tooling/DependencyScanning/DependencyScanningTool.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/Allocator.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/StringSaver.h"
 
 using namespace swift;
 
@@ -176,7 +181,36 @@ void ClangImporter::recordModuleDependencies(
     swiftArgs.push_back(clangModuleDep.ClangModuleMapFile);
 
     // Add args reported by the scanner.
-    llvm::for_each(clangModuleDep.BuildArguments, addClangArg);
+
+    // Round-trip clang args to canonicalize and clear the options that swift
+    // compiler doesn't need.
+    clang::CompilerInvocation depsInvocation;
+    clang::DiagnosticsEngine clangDiags(new clang::DiagnosticIDs(),
+                                        new clang::DiagnosticOptions(),
+                                        new clang::IgnoringDiagConsumer());
+
+    llvm::SmallVector<const char*> clangArgs;
+    llvm::for_each(clangModuleDep.BuildArguments, [&](const std::string &Arg) {
+      clangArgs.push_back(Arg.c_str());
+    });
+
+    bool success = clang::CompilerInvocation::CreateFromArgs(
+        depsInvocation, clangArgs, clangDiags);
+    (void)success;
+    assert(success && "clang option from dep scanner round trip failed");
+
+    // Clear the cache key for module. The module key is computed from clang
+    // invocation, not swift invocation.
+    depsInvocation.getFrontendOpts().ModuleCacheKeys.clear();
+
+    llvm::BumpPtrAllocator allocator;
+    llvm::StringSaver saver(allocator);
+    clangArgs.clear();
+    depsInvocation.generateCC1CommandLine(
+        clangArgs,
+        [&saver](const llvm::Twine &T) { return saver.save(T).data(); });
+
+    llvm::for_each(clangArgs, addClangArg);
 
     // CASFileSystemRootID.
     std::string RootID = clangModuleDep.CASFileSystemRootID
