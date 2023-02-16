@@ -150,7 +150,9 @@ using SwiftSourceModuleDetailsLayout =
                    FileIDField,                      // bridgingHeaderFile
                    FileIDArrayIDField,               // sourceFiles
                    FileIDArrayIDField,               // bridgingSourceFiles
-                   FileIDArrayIDField                // bridgingModuleDependencies
+                   FileIDArrayIDField,               // bridgingModuleDependencies
+                   IdentifierIDField,                // CASFileSystemRootID
+                   FlagIDArrayIDField                // buildCommandLine
                    >;
 
 using SwiftBinaryModuleDetailsLayout =

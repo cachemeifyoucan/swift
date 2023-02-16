@@ -644,7 +644,6 @@ public:
   std::error_code runInSubContext(StringRef moduleName,
                                   StringRef interfacePath,
                                   StringRef outputPath,
-                                  llvm::vfs::FileSystem *FS,
                                   SourceLoc diagLoc,
     llvm::function_ref<std::error_code(ASTContext&, ModuleDecl*,
                                        ArrayRef<StringRef>, ArrayRef<StringRef>,
@@ -652,7 +651,6 @@ public:
   std::error_code runInSubCompilerInstance(StringRef moduleName,
                                            StringRef interfacePath,
                                            StringRef outputPath,
-                                           llvm::vfs::FileSystem *FS,
                                            SourceLoc diagLoc,
                                            bool silenceErrors,
     llvm::function_ref<std::error_code(SubCompilerInstanceInfo&)> action) override;

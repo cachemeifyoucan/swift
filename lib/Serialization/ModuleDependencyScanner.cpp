@@ -23,6 +23,7 @@
 #include "swift/Subsystems.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
+#include "llvm/Support/VirtualFileSystem.h"
 using namespace swift;
 using llvm::ErrorOr;
 
@@ -111,16 +112,11 @@ ErrorOr<ModuleDependencyInfo> ModuleDependencyScanner::scanInterfaceFile(
   llvm::SmallString<32> modulePath = realModuleName.str();
   llvm::sys::path::replace_extension(modulePath, newExt);
   Optional<ModuleDependencyInfo> Result;
-  llvm::IntrusiveRefCntPtr<llvm::cas::CachingOnDiskFileSystem> CASFS = nullptr;
-  if (CacheFS) {
-    CASFS = CacheFS->createProxyFS();
-    CASFS->trackNewAccesses();
-  }
+
   std::error_code code =
     astDelegate.runInSubContext(realModuleName.str(),
                                               moduleInterfacePath.str(),
                                               StringRef(),
-                                              CASFS.get(),
                                               SourceLoc(),
                 [&](ASTContext &Ctx, ModuleDecl *mainMod,
                     ArrayRef<StringRef> BaseArgs,
@@ -165,8 +161,12 @@ ErrorOr<ModuleDependencyInfo> ModuleDependencyScanner::scanInterfaceFile(
     moduleDecl->addAuxiliaryFile(*sourceFile);
 
     std::string RootID;
-    if (CASFS) {
-      RootID = cantFail(CASFS->createTreeFromNewAccesses()).getID().toString();
+    if (dependencyTracker) {
+      dependencyTracker->startTracking();
+      dependencyTracker->trackFile(moduleInterfacePath);
+      RootID = cantFail(dependencyTracker->createTreeFromDependencies())
+                   .getID()
+                   .toString();
       Args.push_back("-enable-cas");
       Args.push_back("-object-store-path");
       Args.push_back(Ctx.ClangImporterOpts.ObjectStorePath);
@@ -214,10 +214,10 @@ Optional<const ModuleDependencyInfo*> SerializedModuleLoaderBase::getModuleDepen
   // FIXME: submodules?
   scanners.push_back(std::make_unique<PlaceholderSwiftModuleScanner>(
       Ctx, LoadMode, moduleId, Ctx.SearchPathOpts.PlaceholderDependencyModuleMap,
-      delegate, cache.getScanService().getSharedCachingFS().get()));
+      delegate, cache.getScanService().createSwiftDependencyTracker()));
   scanners.push_back(std::make_unique<ModuleDependencyScanner>(
       Ctx, LoadMode, moduleId, delegate, ModuleDependencyScanner::MDS_plain,
-      cache.getScanService().getSharedCachingFS().get()));
+      cache.getScanService().createSwiftDependencyTracker()));
 
   // Check whether there is a module with this name that we can import.
   assert(isa<PlaceholderSwiftModuleScanner>(scanners[0].get()) &&

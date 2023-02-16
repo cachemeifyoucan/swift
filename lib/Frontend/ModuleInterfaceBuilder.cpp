@@ -331,7 +331,7 @@ bool ImplicitModuleInterfaceBuilder::buildSwiftModuleInternal(
     }
 
     SubError = (bool)subASTDelegate.runInSubCompilerInstance(
-        moduleName, interfacePath, OutPath, nullptr, diagnosticLoc,
+        moduleName, interfacePath, OutPath, diagnosticLoc,
         silenceInterfaceDiagnostics,
         [&](SubCompilerInstanceInfo &info) {
           auto EBuilder = ExplicitModuleInterfaceBuilder(

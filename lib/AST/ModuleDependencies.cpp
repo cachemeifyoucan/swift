@@ -20,6 +20,7 @@
 #include "swift/Frontend/Frontend.h"
 #include "llvm/CAS/CASProvidingFileSystem.h"
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
+#include "llvm/Support/Path.h"
 using namespace swift;
 
 ModuleDependencyInfoStorageBase::~ModuleDependencyInfoStorageBase() {}
@@ -156,23 +157,32 @@ Optional<std::string> ModuleDependencyInfo::getBridgingHeader() const {
 }
 
 Optional<std::string> ModuleDependencyInfo::getCASFSRootID() const {
+  std::string Root;
   switch (getKind()) {
   case swift::ModuleDependencyKind::SwiftInterface: {
     auto swiftInterfaceStorage =
         cast<SwiftInterfaceModuleDependenciesStorage>(storage.get());
-    return swiftInterfaceStorage->CASFileSystemRootID;
+    Root = swiftInterfaceStorage->textualModuleDetails.CASFileSystemRootID;
+    break;
   }
   case swift::ModuleDependencyKind::SwiftSource: {
-    // TO BE ADDED.
-    return None;
+    auto swiftSourceStorage =
+        cast<SwiftSourceModuleDependenciesStorage>(storage.get());
+    Root = swiftSourceStorage->textualModuleDetails.CASFileSystemRootID;
+    break;
   }
   case swift::ModuleDependencyKind::Clang: {
     auto clangModuleStorage = cast<ClangModuleDependencyStorage>(storage.get());
-    return clangModuleStorage->CASFileSystemRootID;
+    Root = clangModuleStorage->CASFileSystemRootID;
+    break;
   }
   default:
     return None;
   }
+  if (Root.empty())
+    return None;
+
+  return Root;
 }
 
 std::string ModuleDependencyInfo::getModuleOutputPath() const {
@@ -293,6 +303,18 @@ SwiftDependencyScanningService::SwiftDependencyScanningService()
     SharedFilesystemCache.emplace();
 }
 
+void SwiftDependencyTracker::startTracking() {
+  FS.trackNewAccesses();
+
+  for (auto &file : Files)
+    (void)FS.status(file);
+}
+
+llvm::Expected<llvm::cas::ObjectProxy>
+SwiftDependencyTracker::createTreeFromDependencies() {
+  return FS.createTreeFromNewAccesses();
+}
+
 void SwiftDependencyScanningService::overlaySharedFilesystemCacheForCompilation(CompilerInstance &Instance) {
  auto existingFS = Instance.getSourceMgr().getFileSystem();
  llvm::IntrusiveRefCntPtr<
@@ -307,6 +329,14 @@ void SwiftDependencyScanningService::setupCachingDependencyScanningService(
     CompilerInstance &Instance) {
   if (!Instance.getInvocation().getFrontendOptions().EnableCAS)
     return;
+
+  SmallString<PATH_MAX> SDKSettingPath;
+  llvm::sys::path::append(
+      SDKSettingPath,
+      Instance.getInvocation().getSearchPathOptions().getSDKPath(),
+      "SDKSettings.json");
+  CommonDependencyFiles.emplace_back(SDKSettingPath.data(),
+                                     SDKSettingPath.size());
 
   auto CachingFS = llvm::cas::createCachingOnDiskFileSystem(Instance.getObjectStore());
   if (!CachingFS) {

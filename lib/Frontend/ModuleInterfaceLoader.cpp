@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/Frontend/CompileJobCacheResult.h"
 #define DEBUG_TYPE "textual-module-interface"
 
 #include "ModuleInterfaceBuilder.h"
@@ -29,6 +28,7 @@
 #include "swift/Serialization/Validation.h"
 #include "swift/Strings.h"
 #include "clang/Basic/Module.h"
+#include "clang/Frontend/CompileJobCacheResult.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/Preprocessor.h"
@@ -1779,11 +1779,10 @@ std::error_code
 InterfaceSubContextDelegateImpl::runInSubContext(StringRef moduleName,
                                                  StringRef interfacePath,
                                                  StringRef outputPath,
-                                                 llvm::vfs::FileSystem *FS,
                                                  SourceLoc diagLoc,
     llvm::function_ref<std::error_code(ASTContext&, ModuleDecl*, ArrayRef<StringRef>,
                             ArrayRef<StringRef>, StringRef)> action) {
-  return runInSubCompilerInstance(moduleName, interfacePath, outputPath, FS,
+  return runInSubCompilerInstance(moduleName, interfacePath, outputPath,
                                   diagLoc, /*silenceErrors=*/false,
                                   [&](SubCompilerInstanceInfo &info){
     return action(info.Instance->getASTContext(),
@@ -1798,7 +1797,6 @@ std::error_code
 InterfaceSubContextDelegateImpl::runInSubCompilerInstance(StringRef moduleName,
                                                           StringRef interfacePath,
                                                           StringRef outputPath,
-                                                          llvm::vfs::FileSystem *FS,
                                                           SourceLoc diagLoc,
                                                           bool silenceErrors,
                   llvm::function_ref<std::error_code(SubCompilerInstanceInfo&)> action) {
@@ -1892,10 +1890,7 @@ InterfaceSubContextDelegateImpl::runInSubCompilerInstance(StringRef moduleName,
   info.Instance = &subInstance;
   info.CompilerVersion = CompilerVersion;
 
-  if (FS)
-    subInstance.getSourceMgr().setFileSystem(FS);
-  else
-    subInstance.getSourceMgr().setFileSystem(SM.getFileSystem());
+  subInstance.getSourceMgr().setFileSystem(SM.getFileSystem());
 
   ForwardingDiagnosticConsumer FDC(*Diags);
   if (!silenceErrors)
