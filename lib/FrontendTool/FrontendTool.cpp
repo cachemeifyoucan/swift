@@ -51,6 +51,7 @@
 #include "swift/ConstExtract/ConstExtract.h"
 #include "swift/DependencyScan/ScanDependencies.h"
 #include "swift/Frontend/AccumulatingDiagnosticConsumer.h"
+#include "swift/Frontend/CompileJobCacheKey.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/Frontend/ModuleInterfaceLoader.h"
 #include "swift/Frontend/ModuleInterfaceSupport.h"
@@ -69,6 +70,7 @@
 #include "swift/Subsystems.h"
 #include "swift/SymbolGraphGen/SymbolGraphOptions.h"
 
+#include "clang/Frontend/CompileJobCacheResult.h"
 #include "clang/Lex/Preprocessor.h"
 
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
@@ -1403,6 +1405,102 @@ static bool performAction(CompilerInstance &Instance,
   return Instance.getASTContext().hadError();
 }
 
+/// Try replay the compiler result from cache.
+///
+/// Return true if all the outputs are fetched from cache. Otherwise, return
+/// false and will not replay any output.
+static bool tryReplayCompilerResults(CompilerInstance &Instance) {
+  if (!Instance.getInvocation().getFrontendOptions().EnableCAS)
+    return false;
+
+  assert(Instance.getCompilerBaseKey() &&
+         "Instance is not setup correctly for replay");
+
+  auto &CAS = Instance.getObjectStore();
+  auto &Cache = Instance.getActionCache();
+  auto &Diag = Instance.getDiags();
+  clang::cas::CompileJobResultSchema Schema(CAS);
+  bool CanReplayAllOutput = true;
+  SmallVector<std::pair<std::string, llvm::cas::ObjectProxy>> OutputProxies;
+  Instance.getInvocation()
+      .getFrontendOptions()
+      .InputsAndOutputs.forEachOutputFilename([&](StringRef Name) {
+        auto OutputKey = createCompileJobCacheKeyForOutput(
+            CAS, *Instance.getCompilerBaseKey(), Name);
+        if (!OutputKey) {
+          Diag.diagnose(SourceLoc(), diag::error_cas,
+                        toString(OutputKey.takeError()));
+          CanReplayAllOutput = false;
+          return;
+        }
+
+        auto Lookup = Cache.get(CAS.getID(*OutputKey));
+        if (!Lookup) {
+          Diag.diagnose(SourceLoc(), diag::error_cas,
+                        toString(Lookup.takeError()));
+          CanReplayAllOutput = false;
+          return;
+        }
+        if (!*Lookup) {
+          CanReplayAllOutput = false;
+          return;
+        }
+        auto OutputRef = CAS.getReference(**Lookup);
+        if (!OutputRef) {
+          CanReplayAllOutput = false;
+          return;
+        }
+        auto Result = Schema.load(*OutputRef);
+        if (!Result) {
+          Diag.diagnose(SourceLoc(), diag::error_cas,
+                        toString(Result.takeError()));
+          CanReplayAllOutput = false;
+          return;
+        }
+        auto MainOutput = Result->getOutput(
+            clang::cas::CompileJobCacheResult::OutputKind::MainOutput);
+        if (!MainOutput) {
+          CanReplayAllOutput = false;
+          return;
+        }
+        auto LoadedResult = CAS.getProxy(MainOutput->Object);
+        if (!LoadedResult) {
+          Diag.diagnose(SourceLoc(), diag::error_cas,
+                        toString(LoadedResult.takeError()));
+          CanReplayAllOutput = false;
+          return;
+        }
+
+        OutputProxies.emplace_back(Name.str(), *LoadedResult);
+      });
+
+  if (!CanReplayAllOutput)
+    return false;
+
+  // Replay the result only when everything is resolved.
+  // Use on disk output backend directly here to write to disk.
+  llvm::vfs::OnDiskOutputBackend Backend;
+  for (auto &Output : OutputProxies) {
+    auto File = Backend.createFile(Output.first);
+    if (!File) {
+      Diag.diagnose(SourceLoc(), diag::error_opening_output, Output.first,
+                    toString(File.takeError()));
+      continue;
+    }
+    *File << Output.second.getData();
+    if (auto E = File->keep()) {
+      Diag.diagnose(SourceLoc(), diag::error_opening_output, Output.first,
+                    toString(std::move(E)));
+      continue;
+    }
+    Diag.diagnose(SourceLoc(), diag::replay_output, Output.first,
+                  Output.second.getID().toString());
+  }
+
+
+  return true;
+}
+
 /// Performs the compile requested by the user.
 /// \param Instance Will be reset after performIRGeneration when the verifier
 ///                 mode is NoVerify and there were no errors.
@@ -1413,6 +1511,9 @@ static bool performCompile(CompilerInstance &Instance,
   const auto &Invocation = Instance.getInvocation();
   const auto &opts = Invocation.getFrontendOptions();
   const FrontendOptions::ActionType Action = opts.RequestedAction;
+
+  if (tryReplayCompilerResults(Instance))
+    return false;
 
   // To compile LLVM IR, just pass it off unmodified.
   if (opts.InputsAndOutputs.shouldTreatAsLLVM())
