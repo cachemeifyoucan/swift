@@ -2210,6 +2210,7 @@ ExplicitCASModuleLoader::~ExplicitCASModuleLoader() { delete &Impl; }
 
 bool ExplicitCASModuleLoader::findModule(
     ImportPath::Element ModuleID, SmallVectorImpl<char> *ModuleInterfacePath,
+    SmallVectorImpl<char> *moduleInterfaceSourcePath,
     std::unique_ptr<llvm::MemoryBuffer> *ModuleBuffer,
     std::unique_ptr<llvm::MemoryBuffer> *ModuleDocBuffer,
     std::unique_ptr<llvm::MemoryBuffer> *ModuleSourceInfoBuffer,
@@ -2296,6 +2297,7 @@ bool ExplicitCASModuleLoader::findModule(
 std::error_code ExplicitCASModuleLoader::findModuleFilesInDirectory(
     ImportPath::Element ModuleID, const SerializedModuleBaseName &BaseName,
     SmallVectorImpl<char> *ModuleInterfacePath,
+    SmallVectorImpl<char> *moduleInterfaceSourcePath,
     std::unique_ptr<llvm::MemoryBuffer> *ModuleBuffer,
     std::unique_ptr<llvm::MemoryBuffer> *ModuleDocBuffer,
     std::unique_ptr<llvm::MemoryBuffer> *ModuleSourceInfoBuffer,
