@@ -20,7 +20,9 @@
 #include "swift/Frontend/Frontend.h"
 #include "llvm/CAS/CASProvidingFileSystem.h"
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include <system_error>
 using namespace swift;
 
 ModuleDependencyInfoStorageBase::~ModuleDependencyInfoStorageBase() {}
@@ -330,6 +332,7 @@ void SwiftDependencyScanningService::setupCachingDependencyScanningService(
   if (!Instance.getInvocation().getFrontendOptions().EnableCAS)
     return;
 
+  // Add SDKSetting file.
   SmallString<PATH_MAX> SDKSettingPath;
   llvm::sys::path::append(
       SDKSettingPath,
@@ -337,6 +340,17 @@ void SwiftDependencyScanningService::setupCachingDependencyScanningService(
       "SDKSettings.json");
   CommonDependencyFiles.emplace_back(SDKSettingPath.data(),
                                      SDKSettingPath.size());
+
+  // Add Legacy layout file (maybe just hard code instead of searching).
+  StringRef RuntimeLibPath =
+      Instance.getInvocation().getSearchPathOptions().RuntimeLibraryPaths[0];
+  auto &FS = Instance.getFileSystem();
+  std::error_code EC;
+  for (auto F = FS.dir_begin(RuntimeLibPath, EC);
+       !EC && F != llvm::vfs::directory_iterator(); F.increment(EC)) {
+    if (F->path().endswith(".yaml"))
+      CommonDependencyFiles.emplace_back(F->path().str());
+  }
 
   auto CachingFS = llvm::cas::createCachingOnDiskFileSystem(Instance.getObjectStore());
   if (!CachingFS) {
