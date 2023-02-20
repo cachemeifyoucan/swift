@@ -1884,6 +1884,8 @@ swift::dependencies::performModuleScan(CompilerInstance &instance,
     }
   }
 
+  // writeJSON(llvm::errs(), dependencyGraph);
+
   return dependencyGraph;
 }
 
