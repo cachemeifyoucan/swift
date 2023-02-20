@@ -1422,56 +1422,67 @@ static bool tryReplayCompilerResults(CompilerInstance &Instance) {
   clang::cas::CompileJobResultSchema Schema(CAS);
   bool CanReplayAllOutput = true;
   SmallVector<std::pair<std::string, llvm::cas::ObjectProxy>> OutputProxies;
+
+  auto replayOutputFile = [&](StringRef Name) {
+    auto OutputKey = createCompileJobCacheKeyForOutput(
+        CAS, *Instance.getCompilerBaseKey(), Name);
+    if (!OutputKey) {
+      Diag.diagnose(SourceLoc(), diag::error_cas,
+                    toString(OutputKey.takeError()));
+      CanReplayAllOutput = false;
+      return;
+    }
+
+    auto Lookup = Cache.get(CAS.getID(*OutputKey));
+    if (!Lookup) {
+      Diag.diagnose(SourceLoc(), diag::error_cas, toString(Lookup.takeError()));
+      CanReplayAllOutput = false;
+      return;
+    }
+    if (!*Lookup) {
+      Diag.diagnose(SourceLoc(), diag::output_cache_miss, Name);
+      CanReplayAllOutput = false;
+      return;
+    }
+    auto OutputRef = CAS.getReference(**Lookup);
+    if (!OutputRef) {
+      CanReplayAllOutput = false;
+      return;
+    }
+    auto Result = Schema.load(*OutputRef);
+    if (!Result) {
+      Diag.diagnose(SourceLoc(), diag::error_cas, toString(Result.takeError()));
+      CanReplayAllOutput = false;
+      return;
+    }
+    auto MainOutput = Result->getOutput(
+        clang::cas::CompileJobCacheResult::OutputKind::MainOutput);
+    if (!MainOutput) {
+      CanReplayAllOutput = false;
+      return;
+    }
+    auto LoadedResult = CAS.getProxy(MainOutput->Object);
+    if (!LoadedResult) {
+      Diag.diagnose(SourceLoc(), diag::error_cas,
+                    toString(LoadedResult.takeError()));
+      CanReplayAllOutput = false;
+      return;
+    }
+
+    OutputProxies.emplace_back(Name.str(), *LoadedResult);
+  };
+
   Instance.getInvocation()
       .getFrontendOptions()
-      .InputsAndOutputs.forEachOutputFilename([&](StringRef Name) {
-        auto OutputKey = createCompileJobCacheKeyForOutput(
-            CAS, *Instance.getCompilerBaseKey(), Name);
-        if (!OutputKey) {
-          Diag.diagnose(SourceLoc(), diag::error_cas,
-                        toString(OutputKey.takeError()));
-          CanReplayAllOutput = false;
-          return;
-        }
+      .InputsAndOutputs.forEachOutputFilename(replayOutputFile);
 
-        auto Lookup = Cache.get(CAS.getID(*OutputKey));
-        if (!Lookup) {
-          Diag.diagnose(SourceLoc(), diag::error_cas,
-                        toString(Lookup.takeError()));
-          CanReplayAllOutput = false;
-          return;
-        }
-        if (!*Lookup) {
-          CanReplayAllOutput = false;
-          return;
-        }
-        auto OutputRef = CAS.getReference(**Lookup);
-        if (!OutputRef) {
-          CanReplayAllOutput = false;
-          return;
-        }
-        auto Result = Schema.load(*OutputRef);
-        if (!Result) {
-          Diag.diagnose(SourceLoc(), diag::error_cas,
-                        toString(Result.takeError()));
-          CanReplayAllOutput = false;
-          return;
-        }
-        auto MainOutput = Result->getOutput(
-            clang::cas::CompileJobCacheResult::OutputKind::MainOutput);
-        if (!MainOutput) {
-          CanReplayAllOutput = false;
-          return;
-        }
-        auto LoadedResult = CAS.getProxy(MainOutput->Object);
-        if (!LoadedResult) {
-          Diag.diagnose(SourceLoc(), diag::error_cas,
-                        toString(LoadedResult.takeError()));
-          CanReplayAllOutput = false;
-          return;
-        }
-
-        OutputProxies.emplace_back(Name.str(), *LoadedResult);
+  Instance.getInvocation()
+      .getFrontendOptions()
+      .InputsAndOutputs
+      .forEachInputProducingSupplementaryOutput([&](const InputFile &Input) {
+        Input.getPrimarySpecificPaths().SupplementaryOutputs.forEachSetOutput(
+            [&](const std::string &File) { replayOutputFile(File); });
+        return false;
       });
 
   if (!CanReplayAllOutput)

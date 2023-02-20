@@ -486,6 +486,7 @@ REMARK(matching_output_produced,none,
       "produced matching output file '%0' for deterministic check: hash '%1'", (StringRef, StringRef))
 
 REMARK(replay_output, none, "replay output file '%0': hash '%1'", (StringRef, StringRef))
+REMARK(output_cache_miss, none, "cache miss output file '%0'", (StringRef))
 
 // CAS related diagnostics
 ERROR(error_create_cas, none, "failed to create CAS '%0' (%1)", (StringRef, StringRef))
