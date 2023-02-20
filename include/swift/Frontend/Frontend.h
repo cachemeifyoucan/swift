@@ -524,9 +524,6 @@ public:
   llvm::vfs::FileSystem &getFileSystem() const {
     return *SourceMgr.getFileSystem();
   }
-  void setFileSystem(llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS) {
-    SourceMgr.setFileSystem(FS);
-  }
 
   llvm::vfs::OutputBackend &getOutputBackend() const {
     return *TheOutputBackend;

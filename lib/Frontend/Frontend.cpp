@@ -549,7 +549,7 @@ bool CompilerInstance::setUpVirtualFileSystemOverlays() {
                            toString(FS.takeError()));
       return true;
     }
-    setFileSystem(std::move(*FS));
+    SourceMgr.setFileSystem(std::move(*FS));
   }
 
   auto ExpectedOverlay =
