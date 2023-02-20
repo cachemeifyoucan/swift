@@ -17,6 +17,7 @@
 #include <swift/Frontend/CompileJobCacheKey.h>
 #include <swift/Basic/Version.h>
 #include <llvm/ADT/SmallString.h>
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/CAS/HierarchicalTreeBuilder.h"
 #include "llvm/CAS/ObjectStore.h"
 
@@ -27,7 +28,20 @@ llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
     llvm::cas::ObjectStore &CAS, ArrayRef<const char *> Args,
     llvm::Optional<llvm::cas::ObjectRef> CASFS) {
   SmallString<256> CommandLine;
+
+  static const std::vector<std::string> removeArgAndNext = {
+      "-o", "-supplementary-output-file-map"};
+
+  bool SkipNext = false;
   for (StringRef Arg : Args) {
+    if (SkipNext) {
+      SkipNext = false;
+      continue;
+    }
+    if (llvm::is_contained(removeArgAndNext, Arg)) {
+      SkipNext = true;
+      continue;
+    }
     CommandLine.append(Arg);
     CommandLine.push_back(0);
   }
