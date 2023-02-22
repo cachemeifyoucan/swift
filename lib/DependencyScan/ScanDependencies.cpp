@@ -383,6 +383,20 @@ static llvm::Error resolveExplicitModuleInputs(
         rootIDs.push_back(*ID);
     } break;
     case swift::ModuleDependencyKind::SwiftSource: {
+      auto sourceDepDetails = depInfo->getAsSwiftSourceModule();
+      assert(sourceDepDetails && "Expected source dependency");
+      if (!sourceDepDetails->textualModuleDetails.bridgingSourceFiles.empty()) {
+        if (auto tracker =
+                cache.getScanService().createSwiftDependencyTracker()) {
+          tracker->startTracking();
+          for (auto &file : sourceDepDetails->textualModuleDetails.bridgingSourceFiles)
+            tracker->trackFile(file);
+          auto bridgeRoot = tracker->createTreeFromDependencies();
+          if (!bridgeRoot)
+            return bridgeRoot.takeError();
+          rootIDs.push_back(bridgeRoot->getID().toString());
+        }
+      }
       break;
     }
     default:
