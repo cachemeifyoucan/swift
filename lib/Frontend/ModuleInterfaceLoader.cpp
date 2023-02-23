@@ -2147,7 +2147,7 @@ struct ExplicitCASModuleLoader::Implementation {
   llvm::cas::ObjectStore &CAS;
   llvm::cas::ActionCache &Cache;
 
-  llvm::StringMap<ExplicitModuleInfo> ExplicitModuleMap;
+  llvm::StringMap<ExplicitSwiftModuleInputInfo> ExplicitModuleMap;
 
   Implementation(ASTContext &Ctx, llvm::cas::ObjectStore &CAS,
                  llvm::cas::ActionCache &Cache)
@@ -2157,8 +2157,7 @@ struct ExplicitCASModuleLoader::Implementation {
       const std::vector<std::pair<std::string, std::string>>
           &commandLineExplicitInputs) {
     for (const auto &moduleInput : commandLineExplicitInputs) {
-      ExplicitModuleInfo entry;
-      entry.modulePath = moduleInput.second;
+      ExplicitSwiftModuleInputInfo entry(moduleInput.second, {}, {});
       ExplicitModuleMap.try_emplace(moduleInput.first, std::move(entry));
     }
   }
@@ -2230,16 +2229,6 @@ bool ExplicitCASModuleLoader::findModule(
     return false;
   }
   auto &moduleInfo = it->getValue();
-
-  // If this is only a Clang module with no paired Swift module, return false
-  // now so that we don't emit diagnostics about it being missing. This gives
-  // ClangImporter an opportunity to import it.
-  bool hasClangModule = !moduleInfo.clangModuleMapPath.empty() ||
-                        !moduleInfo.clangModulePath.empty();
-  bool hasSwiftModule = !moduleInfo.modulePath.empty();
-  if (hasClangModule && !hasSwiftModule) {
-    return false;
-  }
 
   // Set IsFramework bit according to the moduleInfo
   IsFramework = moduleInfo.isFramework;
