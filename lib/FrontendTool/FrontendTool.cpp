@@ -51,6 +51,7 @@
 #include "swift/ConstExtract/ConstExtract.h"
 #include "swift/DependencyScan/ScanDependencies.h"
 #include "swift/Frontend/AccumulatingDiagnosticConsumer.h"
+#include "swift/Frontend/CachedDiagnostics.h"
 #include "swift/Frontend/CompileJobCacheKey.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/Frontend/ModuleInterfaceLoader.h"
@@ -86,6 +87,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/VirtualOutputBackend.h"
 #include "llvm/Support/VirtualOutputBackends.h"
 #include "llvm/Support/raw_ostream.h"
@@ -2199,6 +2201,9 @@ int swift::performFrontend(ArrayRef<const char *> Args,
   // In parseable output, avoid printing diagnostics
   Instance->addDiagnosticConsumer(&PDC);
 
+  // CachingDiagnosticsProcessor for round-tripping diagnostics.
+  std::unique_ptr<CachingDiagnosticsProcessor> CDP;
+
   struct FinishDiagProcessingCheckRAII {
     bool CalledFinishDiagProcessing = false;
     ~FinishDiagProcessingCheckRAII() {
@@ -2209,6 +2214,15 @@ int swift::performFrontend(ArrayRef<const char *> Args,
 
   auto finishDiagProcessing = [&](int retValue, bool verifierEnabled) -> int {
     FinishDiagProcessingCheckRAII.CalledFinishDiagProcessing = true;
+    if (CDP) {
+      CDP->endCaptureDiagnostics(Instance->getDiags());
+      llvm::SmallString<256> Text;
+      llvm::raw_svector_ostream OS(Text);
+      cantFail(CDP->serializeEmittedDiagnostics(OS));
+      if (llvm::sys::Process::GetEnv("PRINT_CACHE_DIAG"))
+        llvm::outs() << Text << "\n";
+      // cantFail(CDP->replayCachedDiagnostics(Text, *Instance));
+    }
     PDC.setSuppressOutput(false);
     bool diagnosticsError = Instance->getDiags().finishProcessing();
     // If the verifier is enabled and did not encounter any verification errors,
@@ -2454,6 +2468,11 @@ int swift::performFrontend(ArrayRef<const char *> Args,
       emitParseableFinishedMessage(ReturnCode);
 
     return finishDiagProcessing(ReturnCode, /*verifierEnabled*/ false);
+  }
+
+  if (llvm::sys::Process::GetEnv("ROUNDTRIP_CACHE_DIAG")) {
+    CDP = std::make_unique<CachingDiagnosticsProcessor>(*Instance);
+    CDP->startCaptureDiagnostics(Instance->getDiags());
   }
 
   // The compiler instance has been configured; notify our observer.
