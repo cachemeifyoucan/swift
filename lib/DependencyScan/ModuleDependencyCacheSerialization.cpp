@@ -1077,6 +1077,8 @@ void ModuleDependenciesCacheSerializer::collectStringsAndArrays(
           addStringArray(
                    moduleID, ModuleIdentifierArrayKind::BridgingModuleDependencies,
                    swiftTextDeps->textualModuleDetails.bridgingModuleDependencies);
+          addIdentifier(swiftTextDeps->textualModuleDetails.CASFileSystemRootID);
+          addIdentifier(swiftTextDeps->moduleCacheKey);
           break;
         }
         case swift::ModuleDependencyKind::SwiftBinary: {
@@ -1085,6 +1087,7 @@ void ModuleDependenciesCacheSerializer::collectStringsAndArrays(
           addIdentifier(swiftBinDeps->compiledModulePath);
           addIdentifier(swiftBinDeps->moduleDocPath);
           addIdentifier(swiftBinDeps->sourceInfoPath);
+          addIdentifier(swiftBinDeps->moduleCacheKey);
           break;
         }
         case swift::ModuleDependencyKind::SwiftPlaceholder: {
@@ -1108,6 +1111,11 @@ void ModuleDependenciesCacheSerializer::collectStringsAndArrays(
                          swiftSourceDeps->textualModuleDetails.bridgingSourceFiles);
           addStringArray(moduleID, ModuleIdentifierArrayKind::BridgingModuleDependencies,
                          swiftSourceDeps->textualModuleDetails.bridgingModuleDependencies);
+          addStringArray(
+              moduleID, ModuleIdentifierArrayKind::BuildCommandLine,
+              swiftSourceDeps->textualModuleDetails.buildCommandLine);
+          addIdentifier(
+              swiftSourceDeps->textualModuleDetails.CASFileSystemRootID);
           break;
         }
         case swift::ModuleDependencyKind::Clang: {
@@ -1123,6 +1131,7 @@ void ModuleDependenciesCacheSerializer::collectStringsAndArrays(
           addStringArray(moduleID, ModuleIdentifierArrayKind::CapturedPCMArgs,
                    clangDeps->capturedPCMArgs);
           addIdentifier(clangDeps->CASFileSystemRootID);
+          addIdentifier(clangDeps->moduleCacheKey);
           break;
         }
         default:
