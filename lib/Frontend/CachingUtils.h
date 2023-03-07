@@ -21,6 +21,8 @@
 #include "llvm/Support/VirtualOutputBackend.h"
 
 namespace swift {
+std::string getDefaultSwiftCASPath();
+
 llvm::IntrusiveRefCntPtr<llvm::vfs::OutputBackend>
 createSwiftCachingOutputBackend(
     llvm::cas::ObjectStore &CAS, llvm::cas::ActionCache &Cache,

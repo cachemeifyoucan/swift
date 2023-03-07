@@ -15,6 +15,8 @@
 #include "swift/Basic/FileTypes.h"
 #include "swift/Frontend/CompileJobCacheKey.h"
 #include "clang/Frontend/CompileJobCacheResult.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/VirtualOutputFile.h"
 
 using namespace swift;
@@ -106,4 +108,13 @@ swift::createSwiftCachingOutputBackend(
     const FrontendInputsAndOutputs &InputsAndOutputs) {
   return makeIntrusiveRefCnt<SwiftCASOutputBackend>(CAS, Cache, BaseKey,
                                                     InputsAndOutputs);
+}
+
+std::string swift::getDefaultSwiftCASPath() {
+  SmallString<256> Path;
+  if (!llvm::sys::path::cache_directory(Path))
+    llvm::report_fatal_error("cannot get default cache directory");
+  llvm::sys::path::append(Path, "swift-cache");
+
+  return std::string(Path.data(), Path.size());
 }
