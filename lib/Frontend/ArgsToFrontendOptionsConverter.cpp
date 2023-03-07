@@ -348,10 +348,8 @@ bool ArgsToFrontendOptionsConverter::convert(
   Opts.DeterministicCheck = Args.hasArg(OPT_enable_swift_deterministic_check);
 
   Opts.EnableCAS = Args.hasArg(OPT_enable_cas);
-  Opts.CASObjectStorePath = Args.getLastArgValue(
-      OPT_object_store_path, llvm::cas::getDefaultOnDiskCASPath());
-  Opts.CASActionCachePath = Args.getLastArgValue(
-      OPT_action_cache_path, llvm::cas::getDefaultOnDiskActionCachePath());
+  Opts.CASPath =
+      Args.getLastArgValue(OPT_cas_path, llvm::cas::getDefaultOnDiskCASPath());
   Opts.CASFSRootID = Args.getLastArgValue(OPT_cas_fs);
 
   return false;

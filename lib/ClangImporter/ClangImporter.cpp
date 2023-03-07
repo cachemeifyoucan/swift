@@ -701,17 +701,11 @@ importer::getNormalInvocationArguments(
                                llvm::sys::path::get_separator() +
                                "apinotes").str());
 
-  if (!importerOpts.ObjectStorePath.empty()) {
+  if (!importerOpts.CASPath.empty()) {
     invocationArgStrs.push_back("-Xclang");
     invocationArgStrs.push_back("-fcas-path");
     invocationArgStrs.push_back("-Xclang");
-    invocationArgStrs.push_back(importerOpts.ObjectStorePath);
-  }
-  if (!importerOpts.ObjectStorePath.empty()) {
-    invocationArgStrs.push_back("-Xclang");
-    invocationArgStrs.push_back("-faction-cache-path");
-    invocationArgStrs.push_back("-Xclang");
-    invocationArgStrs.push_back(importerOpts.ActionCachePath);
+    invocationArgStrs.push_back(importerOpts.CASPath);
   }
 }
 

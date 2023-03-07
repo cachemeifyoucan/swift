@@ -125,11 +125,8 @@ public:
   /// Use CAS.
   bool EnableCAS = false;
 
-  /// The CAS ObjectStore Path.
-  std::string CASObjectStorePath;
-
-  /// The CAS ActionCache Path.
-  std::string CASActionCachePath;
+  /// The CAS Path.
+  std::string CASPath;
 
   /// CASFS Root.
   std::string CASFSRootID;

@@ -169,9 +169,7 @@ ErrorOr<ModuleDependencyInfo> ModuleDependencyScanner::scanInterfaceFile(
                    .toString();
       Args.push_back("-enable-cas");
       Args.push_back("-object-store-path");
-      Args.push_back(Ctx.ClangImporterOpts.ObjectStorePath);
-      Args.push_back("-action-cache-path");
-      Args.push_back(Ctx.ClangImporterOpts.ActionCachePath);
+      Args.push_back(Ctx.ClangImporterOpts.CASPath);
     }
 
     std::vector<StringRef> ArgsRefs(Args.begin(), Args.end());

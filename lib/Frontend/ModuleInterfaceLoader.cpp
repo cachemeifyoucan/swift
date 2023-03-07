@@ -1659,8 +1659,7 @@ InterfaceSubContextDelegateImpl::InterfaceSubContextDelegateImpl(
   // required by sourcekitd.
   subClangImporterOpts.DetailedPreprocessingRecord =
     clangImporterOpts.DetailedPreprocessingRecord;
-  subClangImporterOpts.ObjectStorePath = clangImporterOpts.ObjectStorePath;
-  subClangImporterOpts.ActionCachePath = clangImporterOpts.ActionCachePath;
+  subClangImporterOpts.CASPath = clangImporterOpts.CASPath;
 
   // If the compiler has been asked to be strict with ensuring downstream dependencies
   // get the parent invocation's context, or this is an Explicit build, inherit the

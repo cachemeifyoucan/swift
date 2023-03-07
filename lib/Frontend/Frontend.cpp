@@ -43,9 +43,8 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/CAS/ActionCache.h"
+#include "llvm/CAS/BuiltinUnifiedCASDatabases.h"
 #include "llvm/CAS/CASFileSystem.h"
-#include "llvm/CAS/CASReference.h"
-#include "llvm/CAS/ObjectStore.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -408,19 +407,14 @@ bool CompilerInstance::setupCASIfNeeded(ArrayRef<const char *> Args) {
   if (!Opts.EnableCAS)
     return false;
 
-  if (auto E =
-          llvm::cas::createOnDiskCAS(Opts.CASObjectStorePath).moveInto(CAS)) {
-    Diagnostics.diagnose(SourceLoc(), diag::error_create_cas,
-                         Opts.CASObjectStorePath, toString(std::move(E)));
+  auto MaybeCache = llvm::cas::createOnDiskUnifiedCASDatabases(Opts.CASPath);
+  if (!MaybeCache) {
+    Diagnostics.diagnose(SourceLoc(), diag::error_create_cas, Opts.CASPath,
+                         toString(MaybeCache.takeError()));
     return true;
   }
-
-  if (auto E = llvm::cas::createOnDiskActionCache(Opts.CASActionCachePath)
-                   .moveInto(Cache)) {
-    Diagnostics.diagnose(SourceLoc(), diag::error_create_cas,
-                         Opts.CASActionCachePath, toString(std::move(E)));
-    return true;
-  }
+  CAS = std::move(MaybeCache->first);
+  Cache = std::move(MaybeCache->second);
 
   // create baseline key.
   llvm::Optional<llvm::cas::ObjectRef> FSRef;

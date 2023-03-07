@@ -802,8 +802,7 @@ namespace swift {
     std::string Optimization;
 
     /// clang CASOptions.
-    std::string ObjectStorePath;
-    std::string ActionCachePath;
+    std::string CASPath;
 
     /// Disable validating the persistent PCH.
     bool PCHDisableValidation = false;

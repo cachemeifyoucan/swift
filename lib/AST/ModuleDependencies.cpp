@@ -362,10 +362,7 @@ void SwiftDependencyScanningService::setupCachingDependencyScanningService(
   CacheFS = std::move(*CachingFS);
 
   clang::CASOptions CASOpts;
-  CASOpts.CASPath =
-      Instance.getInvocation().getFrontendOptions().CASObjectStorePath;
-  CASOpts.CachePath =
-      Instance.getInvocation().getFrontendOptions().CASActionCachePath;
+  CASOpts.CASPath = Instance.getInvocation().getFrontendOptions().CASPath;
   CASOpts.ensurePersistentCAS();
 
   ClangScanningService.emplace(
