@@ -300,8 +300,7 @@ swiftscan_string_ref_t swiftscan_swift_textual_detail_get_cas_fs_root_id(
   return details->swift_textual_details.cas_fs_root_id;
 }
 
-swiftscan_string_ref_t
-swiftscan_swift_textual_detail_detail_get_module_cache_key(
+swiftscan_string_ref_t swiftscan_swift_textual_detail_get_module_cache_key(
     swiftscan_module_details_t details) {
   return details->swift_textual_details.module_cache_key;
 }
