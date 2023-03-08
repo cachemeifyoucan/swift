@@ -168,7 +168,7 @@ ErrorOr<ModuleDependencyInfo> ModuleDependencyScanner::scanInterfaceFile(
                    .getID()
                    .toString();
       Args.push_back("-enable-cas");
-      Args.push_back("-object-store-path");
+      Args.push_back("-cas-path");
       Args.push_back(Ctx.ClangImporterOpts.CASPath);
     }
 

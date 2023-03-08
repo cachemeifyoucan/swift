@@ -21,12 +21,23 @@
 #include "llvm/Support/VirtualOutputBackend.h"
 
 namespace swift {
+
+/// Get the default path for swift CAS.
 std::string getDefaultSwiftCASPath();
 
+/// Create a swift caching output backend that stores the output from
+/// compiler into a CAS.
 llvm::IntrusiveRefCntPtr<llvm::vfs::OutputBackend>
 createSwiftCachingOutputBackend(
     llvm::cas::ObjectStore &CAS, llvm::cas::ActionCache &Cache,
     llvm::cas::ObjectRef BaseKey,
+    const FrontendInputsAndOutputs &InputsAndOutputs);
+
+/// Replay the output of the compilation from cache.
+/// Return true if outputs are replayed, false otherwise.
+bool replayCachedCompilerOutputs(
+    llvm::cas::ObjectStore &CAS, llvm::cas::ActionCache &Cache,
+    llvm::cas::ObjectRef BaseKey, DiagnosticEngine &Diag,
     const FrontendInputsAndOutputs &InputsAndOutputs);
 }
 

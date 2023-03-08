@@ -14,9 +14,9 @@
 
 #include "ArgsToFrontendInputsConverter.h"
 #include "ArgsToFrontendOutputsConverter.h"
-#include "CachingUtils.h"
 #include "swift/AST/DiagnosticsFrontend.h"
 #include "swift/Basic/Platform.h"
+#include "swift/Frontend/CachingUtils.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/Option/Options.h"
 #include "swift/Option/SanitizerOptions.h"

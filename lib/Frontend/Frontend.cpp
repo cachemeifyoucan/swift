@@ -26,6 +26,7 @@
 #include "swift/Basic/FileTypes.h"
 #include "swift/Basic/SourceManager.h"
 #include "swift/Basic/Statistic.h"
+#include "swift/Frontend/CachingUtils.h"
 #include "swift/Frontend/CompileJobCacheKey.h"
 #include "swift/Frontend/ModuleInterfaceLoader.h"
 #include "swift/Parse/Lexer.h"
@@ -52,8 +53,6 @@
 #include "llvm/Support/Process.h"
 #include "llvm/Support/VirtualOutputBackends.h"
 #include <llvm/ADT/StringExtras.h>
-
-#include "CachingUtils.h"
 
 using namespace swift;
 

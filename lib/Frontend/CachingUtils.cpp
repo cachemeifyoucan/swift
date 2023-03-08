@@ -10,13 +10,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CachingUtils.h"
+#include "swift/Frontend/CachingUtils.h"
 
+#include "swift/AST/DiagnosticsFrontend.h"
 #include "swift/Basic/FileTypes.h"
 #include "swift/Frontend/CompileJobCacheKey.h"
 #include "clang/Frontend/CompileJobCacheResult.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/VirtualOutputBackends.h"
 #include "llvm/Support/VirtualOutputFile.h"
 
 using namespace swift;
@@ -117,4 +119,94 @@ std::string swift::getDefaultSwiftCASPath() {
   llvm::sys::path::append(Path, "swift-cache");
 
   return std::string(Path.data(), Path.size());
+}
+
+bool swift::replayCachedCompilerOutputs(
+    ObjectStore &CAS, ActionCache &Cache, ObjectRef BaseKey,
+    DiagnosticEngine &Diag, const FrontendInputsAndOutputs &InputsAndOutputs) {
+  clang::cas::CompileJobResultSchema Schema(CAS);
+  bool CanReplayAllOutput = true;
+  SmallVector<std::pair<std::string, llvm::cas::ObjectProxy>> OutputProxies;
+
+  auto replayOutputFile = [&](StringRef Name) {
+    auto OutputKey = createCompileJobCacheKeyForOutput(CAS, BaseKey, Name);
+    if (!OutputKey) {
+      Diag.diagnose(SourceLoc(), diag::error_cas,
+                    toString(OutputKey.takeError()));
+      CanReplayAllOutput = false;
+      return;
+    }
+
+    auto Lookup = Cache.get(CAS.getID(*OutputKey));
+    if (!Lookup) {
+      Diag.diagnose(SourceLoc(), diag::error_cas, toString(Lookup.takeError()));
+      CanReplayAllOutput = false;
+      return;
+    }
+    if (!*Lookup) {
+      Diag.diagnose(SourceLoc(), diag::output_cache_miss, Name);
+      CanReplayAllOutput = false;
+      return;
+    }
+    auto OutputRef = CAS.getReference(**Lookup);
+    if (!OutputRef) {
+      CanReplayAllOutput = false;
+      return;
+    }
+    auto Result = Schema.load(*OutputRef);
+    if (!Result) {
+      Diag.diagnose(SourceLoc(), diag::error_cas, toString(Result.takeError()));
+      CanReplayAllOutput = false;
+      return;
+    }
+    auto MainOutput = Result->getOutput(
+        clang::cas::CompileJobCacheResult::OutputKind::MainOutput);
+    if (!MainOutput) {
+      CanReplayAllOutput = false;
+      return;
+    }
+    auto LoadedResult = CAS.getProxy(MainOutput->Object);
+    if (!LoadedResult) {
+      Diag.diagnose(SourceLoc(), diag::error_cas,
+                    toString(LoadedResult.takeError()));
+      CanReplayAllOutput = false;
+      return;
+    }
+
+    OutputProxies.emplace_back(Name.str(), *LoadedResult);
+  };
+
+  InputsAndOutputs.forEachOutputFilename(replayOutputFile);
+
+  InputsAndOutputs.forEachInputProducingSupplementaryOutput(
+      [&](const InputFile &Input) {
+        Input.getPrimarySpecificPaths().SupplementaryOutputs.forEachSetOutput(
+            [&](const std::string &File) { replayOutputFile(File); });
+        return false;
+      });
+
+  if (!CanReplayAllOutput)
+    return false;
+
+  // Replay the result only when everything is resolved.
+  // Use on disk output backend directly here to write to disk.
+  llvm::vfs::OnDiskOutputBackend Backend;
+  for (auto &Output : OutputProxies) {
+    auto File = Backend.createFile(Output.first);
+    if (!File) {
+      Diag.diagnose(SourceLoc(), diag::error_opening_output, Output.first,
+                    toString(File.takeError()));
+      continue;
+    }
+    *File << Output.second.getData();
+    if (auto E = File->keep()) {
+      Diag.diagnose(SourceLoc(), diag::error_opening_output, Output.first,
+                    toString(std::move(E)));
+      continue;
+    }
+    Diag.diagnose(SourceLoc(), diag::replay_output, Output.first,
+                  Output.second.getID().toString());
+  }
+
+  return true;
 }
