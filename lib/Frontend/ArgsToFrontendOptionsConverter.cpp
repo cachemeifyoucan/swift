@@ -15,6 +15,7 @@
 #include "ArgsToFrontendInputsConverter.h"
 #include "ArgsToFrontendOutputsConverter.h"
 #include "swift/AST/DiagnosticsFrontend.h"
+#include "swift/Basic/FileTypes.h"
 #include "swift/Basic/Platform.h"
 #include "swift/Frontend/CachingUtils.h"
 #include "swift/Frontend/Frontend.h"
@@ -660,6 +661,12 @@ bool ArgsToFrontendOptionsConverter::
   Opts.InputsAndOutputs.setMainAndSupplementaryOutputs(mainOutputs,
                                                        supplementaryOutputs,
                                                        mainOutputForIndexUnits);
+  // set output type.
+  const file_types::ID outputType =
+      FrontendOptions::formatForPrincipalOutputFileForAction(
+          Opts.RequestedAction);
+  Opts.InputsAndOutputs.setOutputType(outputType);
+
   return false;
 }
 

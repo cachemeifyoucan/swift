@@ -30,13 +30,13 @@ namespace swift {
 // arguments.
 llvm::Expected<llvm::cas::ObjectRef>
 createCompileJobBaseCacheKey(llvm::cas::ObjectStore &CAS,
-                             ArrayRef<const char *> Args,
-                             llvm::Optional<llvm::cas::ObjectRef> CASFS);
+                             ArrayRef<const char *> Args);
 
 llvm::Expected<llvm::cas::ObjectRef>
 createCompileJobCacheKeyForOutput(llvm::cas::ObjectStore &CAS,
                                   llvm::cas::ObjectRef BaseKey,
-                                  StringRef OutputID);
+                                  StringRef ProducingInput,
+                                  file_types::ID OutputType);
 }
 
 #endif

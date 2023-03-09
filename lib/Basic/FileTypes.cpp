@@ -109,6 +109,8 @@ bool file_types::isTextual(ID Id) {
   case file_types::TY_IndexData:
   case file_types::TY_BitstreamOptRecord:
   case file_types::TY_IndexUnitOutputPath:
+  case file_types::TY_SwiftFixIt:
+  case file_types::TY_ModuleSemanticInfo:
     return false;
   case file_types::TY_INVALID:
     llvm_unreachable("Invalid type ID.");
@@ -162,6 +164,8 @@ bool file_types::isAfterLLVM(ID Id) {
   case file_types::TY_IndexUnitOutputPath:
   case file_types::TY_SwiftABIDescriptor:
   case file_types::TY_ConstValues:
+  case file_types::TY_SwiftFixIt:
+  case file_types::TY_ModuleSemanticInfo:
     return false;
   case file_types::TY_INVALID:
     llvm_unreachable("Invalid type ID.");
@@ -215,6 +219,8 @@ bool file_types::isPartOfSwiftCompilation(ID Id) {
   case file_types::TY_IndexUnitOutputPath:
   case file_types::TY_SwiftABIDescriptor:
   case file_types::TY_ConstValues:
+  case file_types::TY_SwiftFixIt:
+  case file_types::TY_ModuleSemanticInfo:
     return false;
   case file_types::TY_INVALID:
     llvm_unreachable("Invalid type ID.");

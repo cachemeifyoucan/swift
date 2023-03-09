@@ -293,20 +293,26 @@ updateModuleCacheKey(ModuleDependencyInfo &depInfo,
       Args.push_back(A.c_str());
   }
 
-  llvm::Optional<llvm::cas::ObjectRef> rootID;
-  if (auto ID = depInfo.getCASFSRootID()) {
-    auto CASID = CAS.parseID(*ID);
-    if (!CASID)
-      return CASID.takeError();
-    rootID = CAS.getReference(*CASID);
-  }
-
-  auto base = createCompileJobBaseCacheKey(CAS, Args, rootID);
+  auto base = createCompileJobBaseCacheKey(CAS, Args);
   if (!base)
     return base.takeError();
 
-  auto key = createCompileJobCacheKeyForOutput(CAS, *base,
-                                               depInfo.getModuleOutputPath());
+  StringRef InputPath;
+  file_types::ID OutputType = file_types::ID::TY_INVALID;
+  if (auto *dep = depInfo.getAsClangModule()) {
+    OutputType = file_types::ID::TY_ClangModuleFile;
+    InputPath = dep->moduleMapFile;
+  } else if (auto *dep = depInfo.getAsSwiftInterfaceModule()) {
+    OutputType = file_types::ID::TY_SwiftModuleFile;
+    InputPath = dep->swiftInterfaceFile;
+  } else if (auto *dep = depInfo.getAsSwiftBinaryModule()) {
+    OutputType = file_types::ID::TY_SwiftModuleFile;
+    InputPath = dep->compiledModulePath;
+  } else
+    llvm_unreachable("Unhandled dependency kind");
+
+  auto key =
+      createCompileJobCacheKeyForOutput(CAS, *base, InputPath, OutputType);
   if (!key)
     return key.takeError();
 

@@ -16,6 +16,7 @@
 #include "swift/Basic/FileTypes.h"
 #include "swift/Frontend/CompileJobCacheKey.h"
 #include "clang/Frontend/CompileJobCacheResult.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/VirtualOutputBackends.h"
@@ -53,10 +54,6 @@ protected:
                                                       InputsAndOutputs);
   }
 
-  Optional<file_types::ID> getOutputFileType(StringRef Path) const {
-    return None;
-  }
-
   Expected<std::unique_ptr<OutputFileImpl>>
   createFileImpl(StringRef ResolvedPath,
                  Optional<OutputConfig> Config) override {
@@ -66,12 +63,22 @@ protected:
           if (Error E = CAS.storeFromString(None, Bytes).moveInto(BytesRef))
             return E;
 
-          // FIXME: Using output path as the additional information for cache
-          // key.
-          auto CacheKey =
-              createCompileJobCacheKeyForOutput(CAS, BaseKey, Path);
+          auto ProducingInput = OutputToInputMap.find(Path);
+          assert(ProducingInput != OutputToInputMap.end() &&
+                 "Unknown output file");
+
+          auto InputFilename = ProducingInput->second.first.getFileName();
+          auto OutputType = ProducingInput->second.second;
+
+          auto CacheKey = createCompileJobCacheKeyForOutput(
+              CAS, BaseKey, InputFilename, OutputType);
           if (!CacheKey)
             return CacheKey.takeError();
+
+          llvm::outs() << "DEBUG: writing output \'" << Path << "\' type \'"
+                       << file_types::getTypeName(OutputType) << "\' input \'"
+                       << InputFilename << "\' hash \'"
+                       << CAS.getID(*CacheKey).toString() << "\'\n";
 
           // Use clang compiler job output for now.
           clang::cas::CompileJobCacheResult::Builder Builder;
@@ -89,16 +96,39 @@ protected:
         });
   }
 
+private:
+  void initBackend(const FrontendInputsAndOutputs &InputsAndOutputs) {
+    file_types::ID mainOutputType = InputsAndOutputs.getOutputType();
+    auto addInput = [&](const InputFile &Input) {
+      OutputToInputMap.insert(
+          {Input.outputFilename(), {Input, mainOutputType}});
+      Input.getPrimarySpecificPaths()
+          .SupplementaryOutputs.forEachSetOutputAndType(
+              [&](const std::string &Out, file_types::ID ID) {
+                OutputToInputMap.insert({Out, {Input, ID}});
+              });
+    };
+    llvm::for_each(InputsAndOutputs.getAllInputs(), addInput);
+  }
+
+  file_types::ID getOutputFileType(StringRef Path) const {
+    return file_types::lookupTypeForExtension(llvm::sys::path::extension(Path));
+  }
+
 public:
   SwiftCASOutputBackend(ObjectStore &CAS, ActionCache &Cache, ObjectRef BaseKey,
                         const FrontendInputsAndOutputs &InputsAndOutputs)
       : CAS(CAS), Cache(Cache), BaseKey(BaseKey),
-        InputsAndOutputs(InputsAndOutputs) {}
+        InputsAndOutputs(InputsAndOutputs) {
+    initBackend(InputsAndOutputs);
+  }
 
 private:
   ObjectStore &CAS;
   ActionCache &Cache;
   ObjectRef BaseKey;
+
+  StringMap<std::pair<const InputFile &, file_types::ID>> OutputToInputMap;
   const FrontendInputsAndOutputs &InputsAndOutputs;
 };
 }
@@ -128,8 +158,10 @@ bool swift::replayCachedCompilerOutputs(
   bool CanReplayAllOutput = true;
   SmallVector<std::pair<std::string, llvm::cas::ObjectProxy>> OutputProxies;
 
-  auto replayOutputFile = [&](StringRef Name) {
-    auto OutputKey = createCompileJobCacheKeyForOutput(CAS, BaseKey, Name);
+  auto replayOutputFile = [&](StringRef InputName, file_types::ID OutputKind,
+                              StringRef OutputPath) {
+    auto OutputKey =
+        createCompileJobCacheKeyForOutput(CAS, BaseKey, InputName, OutputKind);
     if (!OutputKey) {
       Diag.diagnose(SourceLoc(), diag::error_cas,
                     toString(OutputKey.takeError()));
@@ -144,7 +176,7 @@ bool swift::replayCachedCompilerOutputs(
       return;
     }
     if (!*Lookup) {
-      Diag.diagnose(SourceLoc(), diag::output_cache_miss, Name);
+      Diag.diagnose(SourceLoc(), diag::output_cache_miss, OutputPath);
       CanReplayAllOutput = false;
       return;
     }
@@ -173,17 +205,21 @@ bool swift::replayCachedCompilerOutputs(
       return;
     }
 
-    OutputProxies.emplace_back(Name.str(), *LoadedResult);
+    OutputProxies.emplace_back(OutputPath.str(), *LoadedResult);
   };
 
-  InputsAndOutputs.forEachOutputFilename(replayOutputFile);
+  auto replayOutputFromInput = [&] (const InputFile &Input) {
+    auto InputPath = Input.getFileName();
+    replayOutputFile(InputPath, InputsAndOutputs.getOutputType(),
+                     Input.outputFilename());
+    Input.getPrimarySpecificPaths()
+        .SupplementaryOutputs.forEachSetOutputAndType(
+            [&](const std::string &File, file_types::ID ID) {
+              replayOutputFile(InputPath, ID, File);
+            });
+  };
 
-  InputsAndOutputs.forEachInputProducingSupplementaryOutput(
-      [&](const InputFile &Input) {
-        Input.getPrimarySpecificPaths().SupplementaryOutputs.forEachSetOutput(
-            [&](const std::string &File) { replayOutputFile(File); });
-        return false;
-      });
+  llvm::for_each(InputsAndOutputs.getAllInputs(), replayOutputFromInput);
 
   if (!CanReplayAllOutput)
     return false;

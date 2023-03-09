@@ -25,8 +25,7 @@ using namespace swift;
 
 // TODO: Rewrite this into CASNodeSchema.
 llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
-    llvm::cas::ObjectStore &CAS, ArrayRef<const char *> Args,
-    llvm::Optional<llvm::cas::ObjectRef> CASFS) {
+    llvm::cas::ObjectStore &CAS, ArrayRef<const char *> Args) {
   SmallString<256> CommandLine;
 
   static const std::vector<std::string> removeArgAndNext = {
@@ -50,17 +49,11 @@ llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
   Builder.push(
       llvm::cantFail(CAS.storeFromString(None, CommandLine)),
       llvm::cas::TreeEntry::Regular, "command-line");
-  Builder.push(
-      llvm::cantFail(CAS.storeFromString(None, "-cc1")),
-      llvm::cas::TreeEntry::Regular, "computation");
 
   // FIXME: The version is maybe insufficient...
   Builder.push(
       llvm::cantFail(CAS.storeFromString(None, version::getSwiftFullVersion())),
       llvm::cas::TreeEntry::Regular, "version");
-
-  if (CASFS)
-    Builder.push(*CASFS, llvm::cas::TreeEntry::Tree, "filesystem");
 
   if (auto Out = Builder.create(CAS))
     return Out->getRef();
@@ -68,9 +61,14 @@ llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
     return Out.takeError();
 }
 
-llvm::Expected<llvm::cas::ObjectRef>
-swift::createCompileJobCacheKeyForOutput(llvm::cas::ObjectStore &CAS,
-                                         llvm::cas::ObjectRef BaseKey,
-                                         StringRef OutputID) {
-  return CAS.storeFromString({BaseKey}, OutputID);
+llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobCacheKeyForOutput(
+    llvm::cas::ObjectStore &CAS, llvm::cas::ObjectRef BaseKey,
+    StringRef ProducingInput, file_types::ID OutputType) {
+  SmallString<256> OutputInfo;
+
+  // Encode the OutputType as first byte, then append the input file path.
+  OutputInfo.emplace_back((char)OutputType);
+  OutputInfo.append(ProducingInput);
+
+  return CAS.storeFromString({BaseKey}, OutputInfo);
 }

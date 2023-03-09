@@ -39,6 +39,10 @@ class FrontendInputsAndOutputs {
   llvm::StringMap<unsigned> PrimaryInputsByName;
   std::vector<unsigned> PrimaryInputsInOrder;
 
+  /// The file type for main output files. Assuming all inputs produce the
+  /// same kind of output.
+  file_types::ID OutputType = file_types::ID::TY_INVALID;
+
   /// In Single-threaded WMO mode, all inputs are used
   /// both for importing and compiling.
   bool IsSingleThreadedWMO = false;
@@ -190,6 +194,7 @@ private:
       ArrayRef<std::string> outputFiles,
       ArrayRef<SupplementaryOutputPaths> supplementaryOutputs,
       ArrayRef<std::string> outputFilesForIndexUnits = None);
+  void setOutputType(file_types::ID type) { OutputType = type; }
 
 public:
   unsigned countOfInputsProducingMainOutputs() const;
@@ -197,6 +202,7 @@ public:
   bool hasInputsProducingMainOutputs() const {
     return countOfInputsProducingMainOutputs() != 0;
   }
+  file_types::ID getOutputType() const { return OutputType; }
 
   const InputFile &firstInputProducingOutput() const;
   const InputFile &lastInputProducingOutput() const;

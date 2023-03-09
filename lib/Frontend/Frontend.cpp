@@ -432,7 +432,7 @@ bool CompilerInstance::setupCASIfNeeded(ArrayRef<const char *> Args) {
     }
   }
 
-  auto BaseKey = createCompileJobBaseCacheKey(*CAS, Args, FSRef);
+  auto BaseKey = createCompileJobBaseCacheKey(*CAS, Args);
   if (!BaseKey) {
     Diagnostics.diagnose(SourceLoc(), diag::error_cas,
                          toString(BaseKey.takeError()));
