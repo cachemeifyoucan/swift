@@ -90,9 +90,16 @@ namespace swift {
       void parsePlaceholderModuleMap(StringRef fileName) {
         ExplicitModuleMapParser parser(Allocator);
         llvm::StringMap<ExplicitClangModuleInputInfo> ClangDependencyModuleMap;
-        auto result =
-          parser.parseSwiftExplicitModuleMap(fileName, PlaceholderDependencyModuleMap,
-                                             ClangDependencyModuleMap);
+        llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileBufOrErr =
+            llvm::MemoryBuffer::getFile(fileName);
+        if (!fileBufOrErr) {
+          Ctx.Diags.diagnose(SourceLoc(),
+                             diag::explicit_swift_module_map_missing, fileName);
+          return;
+        }
+        auto result = parser.parseSwiftExplicitModuleMap(
+            (*fileBufOrErr)->getMemBufferRef(), PlaceholderDependencyModuleMap,
+            ClangDependencyModuleMap);
         if (result == std::errc::invalid_argument) {
           Ctx.Diags.diagnose(SourceLoc(),
                              diag::placeholder_dependency_module_map_corrupted,

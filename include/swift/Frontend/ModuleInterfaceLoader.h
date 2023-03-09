@@ -111,6 +111,7 @@
 #include "swift/Frontend/Frontend.h"
 #include "swift/Frontend/ModuleInterfaceSupport.h"
 #include "swift/Serialization/SerializedModuleLoader.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/StringSaver.h"
 #include "llvm/Support/YAMLTraits.h"
 
@@ -262,11 +263,13 @@ struct ExplicitClangModuleInputInfo {
   ExplicitClangModuleInputInfo(std::string moduleMapPath,
                                std::string modulePath,
                                bool isFramework = false,
-                               bool isSystem = false)
+                               bool isSystem = false,
+                               llvm::Optional<std::string> moduleCacheKey = None)
     : moduleMapPath(moduleMapPath),
       modulePath(modulePath),
       isFramework(isFramework),
-      isSystem(isSystem) {}
+      isSystem(isSystem),
+      moduleCacheKey(moduleCacheKey) {}
   // Path of the Clang module map file.
   std::string moduleMapPath;
   // Path of a compiled Clang explicit module file (pcm).
@@ -275,6 +278,8 @@ struct ExplicitClangModuleInputInfo {
   bool isFramework = false;
   // A flag that indicates whether this module is a system module
   bool isSystem = false;
+  // The cache key for clang module.
+  llvm::Optional<std::string> moduleCacheKey;
 };
 
 /// Parser of explicit module maps passed into the compiler.
@@ -287,6 +292,7 @@ struct ExplicitClangModuleInputInfo {
 //      "isFramework": false,
 //      "clangModuleMapPath": "A/module.modulemap",
 //      "clangModulePath": "A.pcm",
+//      "clangModuleCacheKey": "llvmcas://<hash>",
 //    },
 //    {
 //      "moduleName": "B",
@@ -296,6 +302,7 @@ struct ExplicitClangModuleInputInfo {
 //      "isFramework": false,
 //      "clangModuleMapPath": "B/module.modulemap",
 //      "clangModulePath": "B.pcm",
+//      "clangModuleCacheKey": "llvmcas://<hash>",
 //    }
 //  ]
 class ExplicitModuleMapParser {
@@ -303,21 +310,14 @@ public:
   ExplicitModuleMapParser(llvm::BumpPtrAllocator &Allocator) : Saver(Allocator) {}
 
   std::error_code
-  parseSwiftExplicitModuleMap(llvm::StringRef fileName,
+  parseSwiftExplicitModuleMap(llvm::MemoryBufferRef BufferRef,
                               llvm::StringMap<ExplicitSwiftModuleInputInfo> &swiftModuleMap,
                               llvm::StringMap<ExplicitClangModuleInputInfo> &clangModuleMap) {
     using namespace llvm::yaml;
-    // Load the input file.
-    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileBufOrErr =
-        llvm::MemoryBuffer::getFile(fileName);
-    if (!fileBufOrErr) {
-      return std::make_error_code(std::errc::no_such_file_or_directory);
-    }
-    StringRef Buffer = fileBufOrErr->get()->getBuffer();
     // Use a new source manager instead of the one from ASTContext because we
     // don't want the JSON file to be persistent.
     llvm::SourceMgr SM;
-    Stream Stream(llvm::MemoryBufferRef(Buffer, fileName), SM);
+    Stream Stream(BufferRef, SM);
     for (auto DI = Stream.begin(); DI != Stream.end(); ++DI) {
       assert(DI != Stream.end() && "Failed to read a document");
       if (auto *MN = dyn_cast_or_null<SequenceNode>(DI->getRoot())) {
@@ -359,7 +359,7 @@ private:
       return true;
     StringRef moduleName;
     llvm::Optional<std::string> swiftModulePath, swiftModuleDocPath,
-                                swiftModuleSourceInfoPath;
+                                swiftModuleSourceInfoPath, clangModuleCacheKey;
     std::string clangModuleMapPath = "", clangModulePath = "";
     bool isFramework = false, isSystem = false;
     for (auto &entry : *mapNode) {
@@ -381,6 +381,8 @@ private:
         clangModuleMapPath = val.str();
       } else if (key == "clangModulePath") {
         clangModulePath = val.str();
+      } else if (key == "clangModuleCacheKey") {
+        clangModuleCacheKey = val.str();
       } else {
         // Being forgiving for future fields.
         continue;
@@ -406,7 +408,8 @@ private:
       ExplicitClangModuleInputInfo entry(clangModuleMapPath,
                                          clangModulePath,
                                          isFramework,
-                                         isSystem);
+                                         isSystem,
+                                         clangModuleCacheKey);
       clangModuleMap.try_emplace(moduleName, std::move(entry));
     }
 

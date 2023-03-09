@@ -1929,14 +1929,21 @@ struct ExplicitSwiftModuleLoader::Implementation {
   void parseSwiftExplicitModuleMap(StringRef fileName) {
     ExplicitModuleMapParser parser(Allocator);
     llvm::StringMap<ExplicitClangModuleInputInfo> ExplicitClangModuleMap;
-    auto result =
-        parser.parseSwiftExplicitModuleMap(fileName, ExplicitModuleMap,
-                                           ExplicitClangModuleMap);
-    if (result == std::errc::invalid_argument)
-      Ctx.Diags.diagnose(SourceLoc(), diag::explicit_swift_module_map_corrupted,
-                         fileName);
-    else if (result == std::errc::no_such_file_or_directory)
+    // Load the input file.
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileBufOrErr =
+        llvm::MemoryBuffer::getFile(fileName);
+    if (!fileBufOrErr) {
       Ctx.Diags.diagnose(SourceLoc(), diag::explicit_swift_module_map_missing,
+                         fileName);
+      return;
+    }
+
+    auto hasError = parser.parseSwiftExplicitModuleMap(
+        (*fileBufOrErr)->getMemBufferRef(), ExplicitModuleMap,
+        ExplicitClangModuleMap);
+
+    if (hasError)
+      Ctx.Diags.diagnose(SourceLoc(), diag::explicit_swift_module_map_corrupted,
                          fileName);
 
     // A single module map can define multiple modules; keep track of the ones
@@ -2152,6 +2159,73 @@ struct ExplicitCASModuleLoader::Implementation {
                  llvm::cas::ActionCache &Cache)
       : Ctx(Ctx), CAS(CAS), Cache(Cache) {}
 
+  llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> loadBuffer(StringRef ID) {
+    auto key = CAS.parseID(ID);
+    if (!key)
+      return key.takeError();
+
+    auto ref = CAS.getReference(*key);
+    if (!ref)
+      return nullptr;
+
+    auto loaded = CAS.getProxy(*ref);
+    if (loaded)
+      return loaded.takeError();
+
+    return loaded->getMemoryBuffer();
+  }
+
+  // Same as the regular explicit module map but must be loaded from
+  // CAS, instead of a file that is not tracked by the dependency.
+  void parseSwiftExplicitModuleMap(StringRef ID) {
+    ExplicitModuleMapParser parser(Allocator);
+    llvm::StringMap<ExplicitClangModuleInputInfo> ExplicitClangModuleMap;
+    auto buf = loadBuffer(ID);
+    if (!buf) {
+      Ctx.Diags.diagnose(SourceLoc(), diag::error_cas,
+                         toString(buf.takeError()));
+      return;
+    }
+    if (!*buf) {
+      Ctx.Diags.diagnose(SourceLoc(), diag::explicit_swift_module_map_missing,
+                         ID);
+      return;
+    }
+
+    auto hasError = parser.parseSwiftExplicitModuleMap(
+        (*buf)->getMemBufferRef(), ExplicitModuleMap, ExplicitClangModuleMap);
+
+    if (hasError)
+      Ctx.Diags.diagnose(SourceLoc(), diag::explicit_swift_module_map_corrupted,
+                         ID);
+
+    std::set<std::string> moduleMapsSeen;
+    std::vector<std::string> &extraClangArgs = Ctx.ClangImporterOpts.ExtraArgs;
+    for (auto &entry : ExplicitClangModuleMap) {
+      const auto &moduleMapPath = entry.getValue().moduleMapPath;
+      if (!moduleMapPath.empty() &&
+          moduleMapsSeen.find(moduleMapPath) == moduleMapsSeen.end()) {
+        moduleMapsSeen.insert(moduleMapPath);
+        extraClangArgs.push_back(
+            (Twine("-fmodule-map-file=") + moduleMapPath).str());
+      }
+
+      const auto &modulePath = entry.getValue().modulePath;
+      if (!modulePath.empty()) {
+        extraClangArgs.push_back(
+            (Twine("-fmodule-file=") + entry.getKey() + "=" + modulePath)
+                .str());
+      }
+      auto cachePath = entry.getValue().moduleCacheKey;
+      if (cachePath) {
+        extraClangArgs.push_back("-Xclang");
+        extraClangArgs.push_back(
+            (Twine("-fmodule-file-cache-key=") + entry.getKey() + "=" + *cachePath)
+                .str());
+      }
+    }
+  }
+
   void addCommandLineExplicitInputs(
       const std::vector<std::pair<std::string, std::string>>
           &commandLineExplicitInputs) {
@@ -2355,7 +2429,11 @@ std::unique_ptr<ExplicitCASModuleLoader> ExplicitCASModuleLoader::create(
       std::unique_ptr<ExplicitCASModuleLoader>(new ExplicitCASModuleLoader(
           ctx, CAS, cache, tracker, loadMode, IgnoreSwiftSourceInfoFile));
   auto &Impl = result->Impl;
-  // TODO: do not support explicit module map file.
+  // If the explicit module map is given, try parse it.
+  if (!ExplicitSwiftModuleMap.empty()) {
+    // Parse a JSON file to collect explicitly built modules.
+    Impl.parseSwiftExplicitModuleMap(ExplicitSwiftModuleMap);
+  }
   // If some modules are provided with explicit
   // '-swift-module-file' options, add those as well.
   if (!ExplicitSwiftModuleInputs.empty()) {
