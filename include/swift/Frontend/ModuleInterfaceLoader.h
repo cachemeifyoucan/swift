@@ -240,12 +240,14 @@ struct ExplicitSwiftModuleInputInfo {
                                llvm::Optional<std::string> moduleDocPath,
                                llvm::Optional<std::string> moduleSourceInfoPath,
                                bool isFramework = false,
-                               bool isSystem = false)
+                               bool isSystem = false,
+                               llvm::Optional<std::string> moduleCacheKey = None)
     : modulePath(modulePath),
       moduleDocPath(moduleDocPath),
       moduleSourceInfoPath(moduleSourceInfoPath),
       isFramework(isFramework),
-      isSystem(isSystem) {}
+      isSystem(isSystem),
+      moduleCacheKey(moduleCacheKey) {}
   // Path of the .swiftmodule file.
   std::string modulePath;
   // Path of the .swiftmoduledoc file.
@@ -256,6 +258,8 @@ struct ExplicitSwiftModuleInputInfo {
   bool isFramework = false;
   // A flag that indicates whether this module is a system module
   bool isSystem = false;
+  // The cache key for clang module.
+  llvm::Optional<std::string> moduleCacheKey;
 };
 
 // Explicitly-specified Clang module inputs
@@ -292,6 +296,7 @@ struct ExplicitClangModuleInputInfo {
 //      "isFramework": false,
 //      "clangModuleMapPath": "A/module.modulemap",
 //      "clangModulePath": "A.pcm",
+//      "moduleCacheKey": "llvmcas://<hash>",
 //      "clangModuleCacheKey": "llvmcas://<hash>",
 //    },
 //    {
@@ -302,6 +307,7 @@ struct ExplicitClangModuleInputInfo {
 //      "isFramework": false,
 //      "clangModuleMapPath": "B/module.modulemap",
 //      "clangModulePath": "B.pcm",
+//      "moduleCacheKey": "llvmcas://<hash>",
 //      "clangModuleCacheKey": "llvmcas://<hash>",
 //    }
 //  ]
@@ -359,7 +365,8 @@ private:
       return true;
     StringRef moduleName;
     llvm::Optional<std::string> swiftModulePath, swiftModuleDocPath,
-                                swiftModuleSourceInfoPath, clangModuleCacheKey;
+                                swiftModuleSourceInfoPath, swiftModuleCacheKey,
+                                clangModuleCacheKey;
     std::string clangModuleMapPath = "", clangModulePath = "";
     bool isFramework = false, isSystem = false;
     for (auto &entry : *mapNode) {
@@ -381,6 +388,8 @@ private:
         clangModuleMapPath = val.str();
       } else if (key == "clangModulePath") {
         clangModulePath = val.str();
+      } else if (key == "moduleCacheKey") {
+        swiftModuleCacheKey = val.str();
       } else if (key == "clangModuleCacheKey") {
         clangModuleCacheKey = val.str();
       } else {
@@ -399,7 +408,8 @@ private:
                                          swiftModuleDocPath,
                                          swiftModuleSourceInfoPath,
                                          isFramework,
-                                         isSystem);
+                                         isSystem,
+                                         swiftModuleCacheKey);
       swiftModuleMap.try_emplace(moduleName, std::move(entry));
     } else {
       assert((!clangModuleMapPath.empty() ||

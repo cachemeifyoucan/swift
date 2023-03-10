@@ -413,7 +413,6 @@ static llvm::Error resolveExplicitModuleInputs(
   // Update the dependency in the cache with the modified command-line.
   auto dependencyInfoCopy = resolvingDepInfo;
   if (resolvingDepInfo.isSwiftInterfaceModule() ||
-      resolvingDepInfo.isSwiftSourceModule() ||
       resolvingDepInfo.isClangModule())
     dependencyInfoCopy.updateCommandLine(commandLine);
 
@@ -434,9 +433,11 @@ static llvm::Error resolveExplicitModuleInputs(
       dependencyInfoCopy.updateCASFileSystemID(NewID);
 
       // Update with casfs option.
-      commandLine.push_back("-cas-fs");
-      commandLine.push_back(NewID);
-      dependencyInfoCopy.updateCommandLine(commandLine);
+      std::vector<std::string> newCommandLine =
+          dependencyInfoCopy.getCommandline();
+      newCommandLine.push_back("-cas-fs");
+      newCommandLine.push_back(NewID);
+      dependencyInfoCopy.updateCommandLine(newCommandLine);
     }
 
     if (resolvingDepInfo.isClangModule() ||

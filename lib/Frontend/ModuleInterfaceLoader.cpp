@@ -2180,6 +2180,7 @@ struct ExplicitCASModuleLoader::Implementation {
   void parseSwiftExplicitModuleMap(StringRef ID) {
     ExplicitModuleMapParser parser(Allocator);
     llvm::StringMap<ExplicitClangModuleInputInfo> ExplicitClangModuleMap;
+#if 0
     auto buf = loadBuffer(ID);
     if (!buf) {
       Ctx.Diags.diagnose(SourceLoc(), diag::error_cas,
@@ -2191,6 +2192,8 @@ struct ExplicitCASModuleLoader::Implementation {
                          ID);
       return;
     }
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileBufOrErr =
+        llvm::MemoryBuffer::getFile(ID);
 
     auto hasError = parser.parseSwiftExplicitModuleMap(
         (*buf)->getMemBufferRef(), ExplicitModuleMap, ExplicitClangModuleMap);
@@ -2198,6 +2201,24 @@ struct ExplicitCASModuleLoader::Implementation {
     if (hasError)
       Ctx.Diags.diagnose(SourceLoc(), diag::explicit_swift_module_map_corrupted,
                          ID);
+#else
+    // Load the input file.
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileBufOrErr =
+        llvm::MemoryBuffer::getFile(ID);
+    if (!fileBufOrErr) {
+      Ctx.Diags.diagnose(SourceLoc(), diag::explicit_swift_module_map_missing,
+                         ID);
+      return;
+    }
+
+    auto hasError = parser.parseSwiftExplicitModuleMap(
+        (*fileBufOrErr)->getMemBufferRef(), ExplicitModuleMap,
+        ExplicitClangModuleMap);
+
+    if (hasError)
+      Ctx.Diags.diagnose(SourceLoc(), diag::explicit_swift_module_map_corrupted,
+                         ID);
+#endif
 
     std::set<std::string> moduleMapsSeen;
     std::vector<std::string> &extraClangArgs = Ctx.ClangImporterOpts.ExtraArgs;
@@ -2236,7 +2257,7 @@ struct ExplicitCASModuleLoader::Implementation {
   }
 
   llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
-  loadFileBuffer(StringRef ID) {
+  loadFileBuffer(StringRef ID, StringRef Name) {
     auto key = CAS.parseID(ID);
     if (!key)
       return key.takeError();
@@ -2264,7 +2285,7 @@ struct ExplicitCASModuleLoader::Implementation {
     if (!buf)
       return buf.takeError();
 
-    return buf->getMemoryBuffer();
+    return buf->getMemoryBuffer(Name);
   }
 };
 
@@ -2307,7 +2328,12 @@ bool ExplicitCASModuleLoader::findModule(
   IsFramework = moduleInfo.isFramework;
   IsSystemModule = moduleInfo.isSystem;
 
-  auto moduleBuf = Impl.loadFileBuffer(moduleInfo.modulePath);
+  // Fallback check for module cache key passed on command-line as module path.
+  std::string moduleCASID = moduleInfo.moduleCacheKey
+                                ? *moduleInfo.moduleCacheKey
+                                : moduleInfo.modulePath;
+
+  auto moduleBuf = Impl.loadFileBuffer(moduleCASID, moduleInfo.modulePath);
   if (!moduleBuf) {
     Ctx.Diags.diagnose(SourceLoc(), diag::error_cas,
                        toString(moduleBuf.takeError()));
@@ -2328,7 +2354,8 @@ bool ExplicitCASModuleLoader::findModule(
   if (isForwardingModule) {
     auto forwardingModule = ForwardingModule::load(*moduleBuf.get());
     if (forwardingModule) {
-      moduleBuf = Impl.loadFileBuffer(forwardingModule->underlyingModulePath);
+      moduleBuf = Impl.loadFileBuffer(forwardingModule->underlyingModulePath,
+                                      forwardingModule->underlyingModulePath);
       if (!moduleBuf) {
         Ctx.Diags.diagnose(SourceLoc(), diag::error_cas,
                            toString(moduleBuf.takeError()));
@@ -2392,7 +2419,10 @@ bool ExplicitCASModuleLoader::canImportModule(ImportPath::Module path,
     return true;
 
   // Open .swiftmodule file and read out the version
-  auto moduleBuf = Impl.loadFileBuffer(it->second.modulePath);
+  std::string moduleCASID = it->second.moduleCacheKey
+                                ? *it->second.moduleCacheKey
+                                : it->second.modulePath;
+  auto moduleBuf = Impl.loadFileBuffer(moduleCASID, it->second.modulePath);
   if (!moduleBuf) {
     Ctx.Diags.diagnose(SourceLoc(), diag::error_cas,
                        toString(moduleBuf.takeError()));
