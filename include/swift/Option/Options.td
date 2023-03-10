@@ -1814,6 +1814,9 @@ def cas_path: Separate<["-"], "cas-path">,
 def cas_fs: Separate<["-"], "cas-fs">,
   Flags<[FrontendOption, NewDriverOnlyOption]>,
   HelpText<"Root CASID for CAS FileSystem">, MetaVarName<"<cas-id>">;
+def bridging_header_pch_key : Separate<["-"], "bridging-header-pch-key">,
+  Flags<[FrontendOption, HelpHidden, ArgumentIsPath]>,
+  HelpText<"Cache Key for bridging header pch">;
 
 // END ONLY SUPPORTED IN NEW DRIVER
 

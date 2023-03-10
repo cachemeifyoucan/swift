@@ -19,6 +19,7 @@
 #include "swift/AST/FileSystem.h"
 #include "swift/AST/Module.h"
 #include "swift/Basic/Platform.h"
+#include "swift/Frontend/CachingUtils.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/Frontend/ModuleInterfaceLoader.h"
 #include "swift/Frontend/ModuleInterfaceSupport.h"
@@ -2241,7 +2242,7 @@ struct ExplicitCASModuleLoader::Implementation {
       if (cachePath) {
         extraClangArgs.push_back("-Xclang");
         extraClangArgs.push_back(
-            (Twine("-fmodule-file-cache-key=") + entry.getKey() + "=" + *cachePath)
+            (Twine("-fmodule-file-cache-key=") + modulePath + "=" + *cachePath)
                 .str());
       }
     }
@@ -2333,13 +2334,12 @@ bool ExplicitCASModuleLoader::findModule(
                                 ? *moduleInfo.moduleCacheKey
                                 : moduleInfo.modulePath;
 
-  auto moduleBuf = Impl.loadFileBuffer(moduleCASID, moduleInfo.modulePath);
+  // FIXME: the loaded module buffer doesn't set an identifier so it
+  // is not tracked in dependency tracker, which doesn't handle modules
+  // that are not located on disk.
+  auto moduleBuf = loadCachedCompileResultFromCacheKey(Impl.CAS, Impl.Cache,
+                                                       Ctx.Diags, moduleCASID);
   if (!moduleBuf) {
-    Ctx.Diags.diagnose(SourceLoc(), diag::error_cas,
-                       toString(moduleBuf.takeError()));
-    return false;
-  }
-  if (!*moduleBuf) {
     // We cannot read the module content, diagnose.
     Ctx.Diags.diagnose(SourceLoc(), diag::error_opening_explicit_module_file,
                        moduleInfo.modulePath);
@@ -2347,21 +2347,17 @@ bool ExplicitCASModuleLoader::findModule(
   }
 
   const bool isForwardingModule =
-      !serialization::isSerializedAST(moduleBuf.get()->getBuffer());
+      !serialization::isSerializedAST(moduleBuf->getBuffer());
   // If the module is a forwarding module, read the actual content from the path
   // encoded in the forwarding module as the actual module content.
   // TODO: need to figure out how fowarding module works.
   if (isForwardingModule) {
     auto forwardingModule = ForwardingModule::load(*moduleBuf.get());
     if (forwardingModule) {
-      moduleBuf = Impl.loadFileBuffer(forwardingModule->underlyingModulePath,
-                                      forwardingModule->underlyingModulePath);
+      moduleBuf = loadCachedCompileResultFromCacheKey(
+          Impl.CAS, Impl.Cache, Ctx.Diags,
+          forwardingModule->underlyingModulePath);
       if (!moduleBuf) {
-        Ctx.Diags.diagnose(SourceLoc(), diag::error_cas,
-                           toString(moduleBuf.takeError()));
-        return false;
-      }
-      if (!*moduleBuf) {
         // We cannot read the module content, diagnose.
         Ctx.Diags.diagnose(SourceLoc(),
                            diag::error_opening_explicit_module_file,
@@ -2377,7 +2373,7 @@ bool ExplicitCASModuleLoader::findModule(
   }
   assert(moduleBuf);
   // Move the opened module buffer to the caller.
-  *ModuleBuffer = std::move(moduleBuf.get());
+  *ModuleBuffer = std::move(moduleBuf);
 
   // TODO: support .swiftdoc file and .swiftsourceinfo file
   return true;

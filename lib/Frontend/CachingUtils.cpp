@@ -17,6 +17,7 @@
 #include "swift/Frontend/CompileJobCacheKey.h"
 #include "clang/Frontend/CompileJobCacheResult.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/CAS/ObjectStore.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/VirtualOutputBackends.h"
@@ -98,6 +99,10 @@ protected:
 
 private:
   void initBackend(const FrontendInputsAndOutputs &InputsAndOutputs) {
+    // FIXME: The output to input map might not be enough for example all the
+    // outputs can be written to `-`, but the backend cannot distinguish which
+    // input it actually comes from. Maybe the solution is just not to cache
+    // any commands write output to `-`.
     file_types::ID mainOutputType = InputsAndOutputs.getOutputType();
     auto addInput = [&](const InputFile &Input) {
       OutputToInputMap.insert(
@@ -245,4 +250,51 @@ bool swift::replayCachedCompilerOutputs(
   }
 
   return true;
+}
+
+static Expected<std::unique_ptr<llvm::MemoryBuffer>>
+loadCachedCompileResultFromCacheKeyImpl(ObjectStore &CAS, ActionCache &Cache,
+                                        StringRef CacheKey,
+                                        StringRef Filename) {
+  auto ID = CAS.parseID(CacheKey);
+  if (!ID)
+    return ID.takeError();
+
+  auto Result = Cache.get(*ID);
+  if (!Result)
+    return Result.takeError();
+  if (!*Result)
+    return nullptr;
+
+  auto OutputRef = CAS.getReference(**Result);
+  if (!OutputRef)
+    return nullptr;
+  clang::cas::CompileJobResultSchema Schema(CAS);
+  auto CachedOutput = Schema.load(*OutputRef);
+
+  if (!CachedOutput)
+    return CachedOutput.takeError();
+
+  auto Output = CachedOutput->getOutput(
+      clang::cas::CompileJobCacheResult::OutputKind::MainOutput);
+  if (!Output)
+    return nullptr;
+
+  auto Proxy = CAS.getProxy(Output->Object);
+  if (!Proxy)
+    return Proxy.takeError();
+
+  return Proxy->getMemoryBuffer(Filename);
+}
+
+std::unique_ptr<llvm::MemoryBuffer> swift::loadCachedCompileResultFromCacheKey(
+    ObjectStore &CAS, ActionCache &Cache, DiagnosticEngine &Diag,
+    StringRef CacheKey, StringRef Filename) {
+  auto Output =
+      loadCachedCompileResultFromCacheKeyImpl(CAS, Cache, CacheKey, Filename);
+  if (!Output) {
+    Diag.diagnose(SourceLoc(), diag::error_cas, toString(Output.takeError()));
+    return nullptr;
+  }
+  return std::move(*Output);
 }

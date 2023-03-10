@@ -39,6 +39,12 @@ bool replayCachedCompilerOutputs(
     llvm::cas::ObjectStore &CAS, llvm::cas::ActionCache &Cache,
     llvm::cas::ObjectRef BaseKey, DiagnosticEngine &Diag,
     const FrontendInputsAndOutputs &InputsAndOutputs);
+
+/// Load the cached compile result from cache.
+std::unique_ptr<llvm::MemoryBuffer> loadCachedCompileResultFromCacheKey(
+    llvm::cas::ObjectStore &CAS, llvm::cas::ActionCache &Cache,
+    DiagnosticEngine &Diag, llvm::StringRef CacheKey,
+    llvm::StringRef Filename = "");
 }
 
 #endif

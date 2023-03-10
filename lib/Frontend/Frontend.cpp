@@ -545,6 +545,25 @@ bool CompilerInstance::setUpVirtualFileSystemOverlays() {
     SourceMgr.setFileSystem(std::move(*FS));
   }
 
+  // If we have a bridging header cache key, try load it now and overlay it.
+  if (!Invocation.getClangImporterOptions().BridgingHeaderPCHCacheKey.empty() &&
+      Invocation.getFrontendOptions().EnableCAS) {
+    auto loadedBridgingBuffer = loadCachedCompileResultFromCacheKey(
+        getObjectStore(), getActionCache(), Diagnostics,
+        Invocation.getClangImporterOptions().BridgingHeaderPCHCacheKey,
+        Invocation.getClangImporterOptions().BridgingHeader);
+    if (loadedBridgingBuffer) {
+      llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> PCHFS =
+          new llvm::vfs::InMemoryFileSystem();
+      PCHFS->addFile(Invocation.getClangImporterOptions().BridgingHeader, 0,
+                     std::move(loadedBridgingBuffer));
+      llvm::IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> OverlayVFS =
+          new llvm::vfs::OverlayFileSystem(SourceMgr.getFileSystem());
+      OverlayVFS->pushOverlay(PCHFS);
+      SourceMgr.setFileSystem(std::move(OverlayVFS));
+    }
+  }
+
   auto ExpectedOverlay =
       Invocation.getSearchPathOptions().makeOverlayFileSystem(
           SourceMgr.getFileSystem());
