@@ -19,6 +19,7 @@
 #include "llvm/CAS/ObjectStore.h"
 #include "llvm/CAS/CASReference.h"
 #include "llvm/Support/VirtualOutputBackend.h"
+#include <memory>
 
 namespace swift {
 
@@ -45,6 +46,29 @@ std::unique_ptr<llvm::MemoryBuffer> loadCachedCompileResultFromCacheKey(
     llvm::cas::ObjectStore &CAS, llvm::cas::ActionCache &Cache,
     DiagnosticEngine &Diag, llvm::StringRef CacheKey,
     llvm::StringRef Filename = "");
+
+namespace cas {
+/// Helper class to manage CAS/Caching from libSwiftScan C APIs.
+class CachingTool {
+public:
+  // Create the tool with a list of arguments from compiler invocation.
+  CachingTool(llvm::StringRef Path);
+
+  // Compute the CASID for PCH output from invocation.
+  std::string computeCacheKeyForPCH(llvm::ArrayRef<const char *> Args,
+                                    StringRef HeaderPath);
+
+  // Store content into CAS.
+  std::string storeContent(llvm::StringRef Content);
+
+  // Check if the tool is correctly initialized.
+  bool isValid() const { return CAS && Cache; }
+
+private:
+  std::unique_ptr<llvm::cas::ObjectStore> CAS;
+  std::unique_ptr<llvm::cas::ActionCache> Cache;
+};
+} // namespace cas
 }
 
 #endif

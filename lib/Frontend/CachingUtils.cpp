@@ -17,11 +17,15 @@
 #include "swift/Frontend/CompileJobCacheKey.h"
 #include "clang/Frontend/CompileJobCacheResult.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/CAS/BuiltinUnifiedCASDatabases.h"
 #include "llvm/CAS/ObjectStore.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/VirtualOutputBackends.h"
 #include "llvm/Support/VirtualOutputFile.h"
+
+#define DEBUG_TYPE "cache-util"
 
 using namespace swift;
 using namespace llvm;
@@ -76,10 +80,11 @@ protected:
           if (!CacheKey)
             return CacheKey.takeError();
 
-          llvm::outs() << "DEBUG: writing output \'" << Path << "\' type \'"
-                       << file_types::getTypeName(OutputType) << "\' input \'"
-                       << InputFilename << "\' hash \'"
-                       << CAS.getID(*CacheKey).toString() << "\'\n";
+          LLVM_DEBUG(llvm::dbgs()
+                         << "DEBUG: writing output \'" << Path << "\' type \'"
+                         << file_types::getTypeName(OutputType) << "\' input \'"
+                         << InputFilename << "\' hash \'"
+                         << CAS.getID(*CacheKey).toString() << "\'\n";);
 
           // Use clang compiler job output for now.
           clang::cas::CompileJobCacheResult::Builder Builder;
@@ -138,8 +143,10 @@ private:
 };
 }
 
+namespace swift {
+
 llvm::IntrusiveRefCntPtr<llvm::vfs::OutputBackend>
-swift::createSwiftCachingOutputBackend(
+createSwiftCachingOutputBackend(
     llvm::cas::ObjectStore &CAS, llvm::cas::ActionCache &Cache,
     llvm::cas::ObjectRef BaseKey,
     const FrontendInputsAndOutputs &InputsAndOutputs) {
@@ -147,7 +154,7 @@ swift::createSwiftCachingOutputBackend(
                                                     InputsAndOutputs);
 }
 
-std::string swift::getDefaultSwiftCASPath() {
+std::string getDefaultSwiftCASPath() {
   SmallString<256> Path;
   if (!llvm::sys::path::cache_directory(Path))
     llvm::report_fatal_error("cannot get default cache directory");
@@ -156,7 +163,7 @@ std::string swift::getDefaultSwiftCASPath() {
   return std::string(Path.data(), Path.size());
 }
 
-bool swift::replayCachedCompilerOutputs(
+bool replayCachedCompilerOutputs(
     ObjectStore &CAS, ActionCache &Cache, ObjectRef BaseKey,
     DiagnosticEngine &Diag, const FrontendInputsAndOutputs &InputsAndOutputs) {
   clang::cas::CompileJobResultSchema Schema(CAS);
@@ -287,9 +294,10 @@ loadCachedCompileResultFromCacheKeyImpl(ObjectStore &CAS, ActionCache &Cache,
   return Proxy->getMemoryBuffer(Filename);
 }
 
-std::unique_ptr<llvm::MemoryBuffer> swift::loadCachedCompileResultFromCacheKey(
-    ObjectStore &CAS, ActionCache &Cache, DiagnosticEngine &Diag,
-    StringRef CacheKey, StringRef Filename) {
+std::unique_ptr<llvm::MemoryBuffer>
+loadCachedCompileResultFromCacheKey(ObjectStore &CAS, ActionCache &Cache,
+                                    DiagnosticEngine &Diag, StringRef CacheKey,
+                                    StringRef Filename) {
   auto Output =
       loadCachedCompileResultFromCacheKeyImpl(CAS, Cache, CacheKey, Filename);
   if (!Output) {
@@ -298,3 +306,51 @@ std::unique_ptr<llvm::MemoryBuffer> swift::loadCachedCompileResultFromCacheKey(
   }
   return std::move(*Output);
 }
+
+namespace cas {
+
+CachingTool::CachingTool(StringRef Path) {
+  auto DB = llvm::cas::createOnDiskUnifiedCASDatabases(Path);
+  if (!DB) {
+    llvm::errs() << "Failed to create CAS at " << Path << ": "
+                 << toString(DB.takeError()) << "\n";
+    return;
+  }
+
+  CAS = std::move(DB->first);
+  Cache = std::move(DB->second);
+}
+
+std::string CachingTool::computeCacheKeyForPCH(ArrayRef<const char *> Args,
+                                               StringRef HeaderPath) {
+  auto BaseKey = createCompileJobBaseCacheKey(*CAS, Args);
+  if (!BaseKey) {
+    llvm::errs() << "Failed to create cache key: "
+                 << toString(BaseKey.takeError()) << "\n";
+    return "";
+  }
+
+  auto PCHKey = createCompileJobCacheKeyForOutput(*CAS, *BaseKey, HeaderPath,
+                                                  file_types::ID::TY_PCH);
+  if (!PCHKey) {
+    llvm::errs() << "Failed to create cache key: "
+                 << toString(PCHKey.takeError()) << "\n";
+    return "";
+  }
+
+  return CAS->getID(*PCHKey).toString();
+}
+
+std::string CachingTool::storeContent(StringRef Content) {
+  auto Result = CAS->storeFromString({}, Content);
+  if (!Result) {
+    llvm::errs() << "Failed to store to CAS: " << toString(Result.takeError())
+                 << "\n";
+    return "";
+  }
+
+  return CAS->getID(*Result).toString();
+}
+
+} // namespace cas
+} // namespace swift

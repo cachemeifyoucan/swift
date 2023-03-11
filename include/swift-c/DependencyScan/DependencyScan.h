@@ -416,6 +416,28 @@ swiftscan_scanner_cache_reset(swiftscan_scanner_t scanner);
 /// An entry point to invoke the compiler via a library call.
 SWIFTSCAN_PUBLIC int invoke_swift_compiler(int argc, const char **argv);
 
+//=== Scanner CAS Operations ----------------------------------------------===//
+
+/// Opaque container for a CAS instance that includes both ObjectStore and
+/// ActionCache.
+typedef struct swiftscan_cas_s *swiftscan_cas_t;
+
+/// Create a \c cas instance that points to path.
+SWIFTSCAN_PUBLIC swiftscan_cas_t swiftscan_cas_create(const char *path);
+
+/// Dispose the \c cas instance.
+SWIFTSCAN_PUBLIC void swiftscan_cas_dispose(swiftscan_cas_t cas);
+
+/// Compute \c CacheKey for PCH from an emit-pch invocation and a \c cas.
+/// Return \c CacheKey as string.
+SWIFTSCAN_PUBLIC swiftscan_string_ref_t swiftscan_compute_cache_key_pch(
+    swiftscan_cas_t cas, int argc, const char **argv, const char *header);
+
+/// Store content into CAS. Return \c CASID as string.
+SWIFTSCAN_PUBLIC swiftscan_string_ref_t swiftscan_cas_store(swiftscan_cas_t cas,
+                                                            uint8_t *data,
+                                                            unsigned size);
+
 //===----------------------------------------------------------------------===//
 
 SWIFTSCAN_END_DECLS

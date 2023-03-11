@@ -19,11 +19,14 @@
 #include "swift/DependencyScan/DependencyScanImpl.h"
 #include "swift/DependencyScan/DependencyScanningTool.h"
 #include "swift/DependencyScan/StringUtils.h"
+#include "swift/Frontend/CachingUtils.h"
 #include "swift/Option/Options.h"
 
 using namespace swift::dependencies;
+using namespace swift::cas;
 
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(DependencyScanningTool, swiftscan_scanner_t)
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(CachingTool, swiftscan_cas_t)
 
 //=== Private Cleanup Functions -------------------------------------------===//
 
@@ -640,6 +643,42 @@ swiftscan_diagnostics_set_dispose(swiftscan_diagnostic_set_t* diagnostics){
   }
   delete[] diagnostics->diagnostics;
   delete diagnostics;
+}
+
+//=== CAS Functions ----------------------------------------------------------//
+
+swiftscan_cas_t swiftscan_cas_create(const char *path) {
+  std::string CASPath(path);
+  if (CASPath.empty()) {
+    CASPath = swift::getDefaultSwiftCASPath();
+  }
+  CachingTool *tool = new CachingTool(CASPath);
+  if (!tool->isValid()) {
+    delete tool;
+    return nullptr;
+  }
+  return wrap(tool);
+}
+
+void swiftscan_cas_dispose(swiftscan_cas_t cas) { delete unwrap(cas); }
+
+swiftscan_string_ref_t swiftscan_compute_cache_key_pch(swiftscan_cas_t cas,
+                                                       int argc,
+                                                       const char **argv,
+                                                       const char *header) {
+  std::vector<const char *> Compilation;
+  for (int i = 0; i < argc; ++i)
+    Compilation.push_back(argv[i]);
+
+  auto ID = unwrap(cas)->computeCacheKeyForPCH(Compilation, header);
+  return swift::c_string_utils::create_clone(ID.c_str());
+}
+
+swiftscan_string_ref_t
+swiftscan_cas_store(swiftscan_cas_t cas, uint8_t *data, unsigned size) {
+  llvm::StringRef StrContent((char*)data, size);
+  auto ID = unwrap(cas)->storeContent(StrContent);
+  return swift::c_string_utils::create_clone(ID.c_str());
 }
 
 //=== Experimental Compiler Invocation Functions ------------------------===//

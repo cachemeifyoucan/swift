@@ -2170,7 +2170,7 @@ struct ExplicitCASModuleLoader::Implementation {
       return nullptr;
 
     auto loaded = CAS.getProxy(*ref);
-    if (loaded)
+    if (!loaded)
       return loaded.takeError();
 
     return loaded->getMemoryBuffer();
@@ -2181,7 +2181,7 @@ struct ExplicitCASModuleLoader::Implementation {
   void parseSwiftExplicitModuleMap(StringRef ID) {
     ExplicitModuleMapParser parser(Allocator);
     llvm::StringMap<ExplicitClangModuleInputInfo> ExplicitClangModuleMap;
-#if 0
+#if 1
     auto buf = loadBuffer(ID);
     if (!buf) {
       Ctx.Diags.diagnose(SourceLoc(), diag::error_cas,

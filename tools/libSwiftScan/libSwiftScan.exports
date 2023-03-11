@@ -72,4 +72,8 @@ swiftscan_scanner_diagnostics_reset
 swiftscan_diagnostic_get_message
 swiftscan_diagnostic_get_severity
 swiftscan_diagnostics_set_dispose
+swiftscan_cas_create
+swiftscan_cas_dispose
+swiftscan_cas_store
+swiftscan_compute_cache_key_pch
 invoke_swift_compiler

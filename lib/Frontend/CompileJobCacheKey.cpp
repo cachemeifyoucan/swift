@@ -31,6 +31,11 @@ llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
   static const std::vector<std::string> removeArgAndNext = {
       "-o", "-supplementary-output-file-map"};
 
+  // Don't count the `-frontend` in the first location since only frontend
+  // invocation can have a cache key.
+  if (Args.size() > 1 && StringRef(Args.front()) == "-frontend")
+    Args = Args.drop_front();
+
   bool SkipNext = false;
   for (StringRef Arg : Args) {
     if (SkipNext) {
