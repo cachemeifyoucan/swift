@@ -88,8 +88,9 @@ private:
     // any commands write output to `-`.
     file_types::ID mainOutputType = InputsAndOutputs.getOutputType();
     auto addInput = [&](const InputFile &Input) {
-      OutputToInputMap.insert(
-          {Input.outputFilename(), {Input, mainOutputType}});
+      if (!Input.outputFilename().empty())
+        OutputToInputMap.insert(
+            {Input.outputFilename(), {Input, mainOutputType}});
       Input.getPrimarySpecificPaths()
           .SupplementaryOutputs.forEachSetOutputAndType(
               [&](const std::string &Out, file_types::ID ID) {
@@ -152,6 +153,11 @@ bool replayCachedCompilerOutputs(
   auto replayOutputFile =
       [&](StringRef InputName, file_types::ID OutputKind,
           StringRef OutputPath) -> Optional<llvm::cas::ObjectProxy> {
+    LLVM_DEBUG(llvm::dbgs()
+                   << "DEBUG: lookup output \'" << OutputPath << "\' type \'"
+                   << file_types::getTypeName(OutputKind) << "\' input \'"
+                   << InputName << "\n";);
+
     auto OutputKey =
         createCompileJobCacheKeyForOutput(CAS, BaseKey, InputName, OutputKind);
     if (!OutputKey) {
@@ -195,12 +201,14 @@ bool replayCachedCompilerOutputs(
 
   auto replayOutputFromInput = [&](const InputFile &Input) {
     auto InputPath = Input.getFileName();
-    if (auto Result =
-            replayOutputFile(InputPath, InputsAndOutputs.getOutputType(),
-                             Input.outputFilename()))
-      OutputProxies.emplace_back(Input.outputFilename(), *Result);
-    else
-      CanReplayAllOutput = false;
+    if (!Input.outputFilename().empty()) {
+      if (auto Result =
+              replayOutputFile(InputPath, InputsAndOutputs.getOutputType(),
+                               Input.outputFilename()))
+        OutputProxies.emplace_back(Input.outputFilename(), *Result);
+      else
+        CanReplayAllOutput = false;
+    }
 
     Input.getPrimarySpecificPaths()
         .SupplementaryOutputs.forEachSetOutputAndType(
