@@ -706,6 +706,8 @@ importer::getNormalInvocationArguments(
     invocationArgStrs.push_back("-fcas-path");
     invocationArgStrs.push_back("-Xclang");
     invocationArgStrs.push_back(importerOpts.CASPath);
+    invocationArgStrs.push_back("-Xclang");
+    invocationArgStrs.push_back("-fno-pch-timestamp");
   }
 }
 
