@@ -471,6 +471,15 @@ void CompilerInstance::setupOutputBackend() {
   }
 }
 
+void CompilerInstance::setupCachingDiagnosticsProcessorIfNeeded() {
+  if (!Invocation.getFrontendOptions().EnableCAS)
+    return;
+
+  // Only setup if using CAS.
+  CDP = std::make_unique<CachingDiagnosticsProcessor>(*this);
+  CDP->startCaptureDiagnostics();
+}
+
 bool CompilerInstance::setup(const CompilerInvocation &Invoke,
                              std::string &Error, ArrayRef<const char *> Args) {
   Invocation = Invoke;
@@ -510,6 +519,10 @@ bool CompilerInstance::setup(const CompilerInvocation &Invoke,
     Error = "Setting up diagnostics verified failed";
     return true;
   }
+
+  // Setup caching diagnostics processor. It should be setup after all other
+  // DiagConsumers are added.
+  setupCachingDiagnosticsProcessorIfNeeded();
 
   // If we expect an implicit stdlib import, load in the standard library. If we
   // either fail to find it or encounter an error while loading it, bail early. Continuing will at best

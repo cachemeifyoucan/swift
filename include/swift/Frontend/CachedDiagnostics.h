@@ -33,16 +33,18 @@ public:
   ~CachingDiagnosticsProcessor();
 
   /// Start capturing all the diagnostics from DiagnosticsEngine.
-  void startCaptureDiagnostics(DiagnosticEngine &Diags);
+  void startCaptureDiagnostics();
   /// End capturing all the diagnostics from DiagnosticsEngine.
-  void endCaptureDiagnostics(DiagnosticEngine &Diags);
+  void endCaptureDiagnostics();
+
+  /// Disable catpure.
+  void setDisableCapture();
 
   /// Emit serialized diagnostics into output stream.
   llvm::Error serializeEmittedDiagnostics(llvm::raw_ostream &os);
 
   /// Used to replay the previously cached diagnostics, after a cache hit.
-  llvm::Error replayCachedDiagnostics(llvm::StringRef Buffer,
-                                      CompilerInstance &Instance);
+  llvm::Error replayCachedDiagnostics(llvm::StringRef Buffer);
 
 private:
   class Implementation;

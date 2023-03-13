@@ -19,12 +19,15 @@
 #include "swift/AST/DiagnosticConsumer.h"
 #include "swift/AST/DiagnosticsFrontend.h"
 #include "swift/Basic/SourceManager.h"
+#include "swift/Frontend/CachingUtils.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/Frontend/FrontendInputsAndOutputs.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TinyPtrVector.h"
+#include "llvm/Support/Compression.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/VirtualFileSystem.h"
@@ -32,6 +35,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include <memory>
 #include <system_error>
+
+#define DEBUG_TYPE "cached-diags"
 
 using namespace swift;
 
@@ -603,29 +608,34 @@ public:
   Implementation(CompilerInstance &Instance)
       : InstanceSourceMgr(Instance.getSourceMgr()),
         InAndOut(
-            Instance.getInvocation().getFrontendOptions().InputsAndOutputs) {}
+            Instance.getInvocation().getFrontendOptions().InputsAndOutputs),
+        Diags(Instance.getDiags()) {}
   ~Implementation() {}
 
-  void startCaptureDiagnostics(DiagnosticEngine &Diags) {
+  void startCaptureDiagnostics() {
     assert(!IsCapturing && "Already started capturing");
     OrigConsumers = Diags.takeConsumers();
     Diags.addConsumer(*this);
     IsCapturing = true;
   }
 
-  void endCaptureDiagnostics(DiagnosticEngine &Diags) {
+  void endCaptureDiagnostics() {
     assert(IsCapturing && "Did not start capturing");
     assert(Diags.getConsumers().size() == 1 && "Overlapping capture");
     Diags.removeConsumer(*this);
-    llvm::for_each(OrigConsumers, [&Diags](DiagnosticConsumer *DC) {
+    llvm::for_each(OrigConsumers, [&](DiagnosticConsumer *DC) {
       Diags.addConsumer(*DC);
     });
     OrigConsumers.clear();
     IsCapturing = false;
   }
 
-  llvm::Error replayCachedDiagnostics(llvm::StringRef Buffer,
-                                      DiagnosticEngine &Diags) {
+  void setDisableCapture() {
+    assert(!IsCapturing && "Cannot disable capture in the middle of capture");
+    DisableCapture = true;
+  }
+
+  llvm::Error replayCachedDiagnostics(llvm::StringRef Buffer) {
     return DiagnosticSerializer::emitDiagnosticsFromCached(
         Buffer, getDiagnosticSourceMgr(), Diags);
   }
@@ -640,6 +650,25 @@ public:
         Diag->handleDiagnostic(getDiagnosticSourceMgr(), Info);
       return llvm::Error::success();
     });
+  }
+
+  bool finishProcessing() override {
+    if (DisableCapture)
+      return false;
+
+    // Finish all the consumers that are being captured.
+    for (auto *Diag : OrigConsumers)
+      Diag->finishProcessing();
+
+    endCaptureDiagnostics();
+    llvm::SmallString<256> Text;
+    llvm::raw_svector_ostream OS(Text);
+    if (auto Err = serializeEmittedDiagnostics(OS)) {
+      Diags.diagnose(SourceLoc(), diag::error_failed_cached_diag,
+                     toString(std::move(Err)));
+      return true;
+    }
+    return serializedOutputCallback(OS.str());
   }
 
   llvm::Error serializeEmittedDiagnostics(llvm::raw_ostream &os) {
@@ -690,23 +719,68 @@ private:
 
   SourceManager &InstanceSourceMgr;
   const FrontendInputsAndOutputs &InAndOut;
+  DiagnosticEngine &Diags;
+
+  llvm::unique_function<bool(StringRef)> serializedOutputCallback;
 
   bool IsCapturing = false;
+  bool DisableCapture = false;
 };
 
 CachingDiagnosticsProcessor::CachingDiagnosticsProcessor(
     CompilerInstance &Instance)
-    : Impl(*new Implementation(Instance)) {}
-CachingDiagnosticsProcessor::~CachingDiagnosticsProcessor() { delete &Impl; }
+    : Impl(*new Implementation(Instance)) {
+  Impl.serializedOutputCallback = [&](StringRef Output) {
+    LLVM_DEBUG(llvm::dbgs() << Output << "\n";);
+    if (!Instance.getInvocation().getFrontendOptions().EnableCAS)
+      return false;
 
-void CachingDiagnosticsProcessor::startCaptureDiagnostics(
-    DiagnosticEngine &Diags) {
-  Impl.startCaptureDiagnostics(Diags);
+    // compress the YAML file.
+    llvm::SmallVector<uint8_t, 512> Compression;
+    if (llvm::compression::zstd::isAvailable())
+      llvm::compression::zstd::compress(arrayRefFromStringRef(Output),
+                                        Compression);
+    else if (llvm::compression::zlib::isAvailable())
+      llvm::compression::zlib::compress(arrayRefFromStringRef(Output),
+                                        Compression);
+
+    // Write the uncompressed size in the end.
+    if (!Compression.empty()) {
+      llvm::raw_svector_ostream BufOS((SmallVectorImpl<char> &)Compression);
+      llvm::support::endian::Writer Writer(BufOS, llvm::support::little);
+      Writer.write(uint32_t(Output.size()));
+    }
+
+    StringRef Content = Compression.empty() ? Output : toStringRef(Compression);
+    // Store CachedDiagnostics in the CAS/Cache. There is no real associated
+    // inputs.
+    auto Err = storeCachedCompilerOutput(
+        Instance.getObjectStore(), Instance.getActionCache(),
+        "<cached-diagnostics>", Content, *Instance.getCompilerBaseKey(),
+        "<cached-diagnostics>", file_types::ID::TY_CachedDiagnostics);
+
+    if (Err) {
+      Instance.getDiags().diagnose(SourceLoc(), diag::error_cas,
+                                   toString(std::move(Err)));
+      return true;
+    }
+
+    return false;
+  };
 }
 
-void CachingDiagnosticsProcessor::endCaptureDiagnostics(
-    DiagnosticEngine &Diags) {
-  Impl.endCaptureDiagnostics(Diags);
+CachingDiagnosticsProcessor::~CachingDiagnosticsProcessor() { delete &Impl; }
+
+void CachingDiagnosticsProcessor::startCaptureDiagnostics() {
+  Impl.startCaptureDiagnostics();
+}
+
+void CachingDiagnosticsProcessor::endCaptureDiagnostics() {
+  Impl.endCaptureDiagnostics();
+}
+
+void CachingDiagnosticsProcessor::setDisableCapture() {
+  Impl.setDisableCapture();
 }
 
 llvm::Error CachingDiagnosticsProcessor::serializeEmittedDiagnostics(
@@ -714,7 +788,28 @@ llvm::Error CachingDiagnosticsProcessor::serializeEmittedDiagnostics(
   return Impl.serializeEmittedDiagnostics(os);
 }
 
-llvm::Error CachingDiagnosticsProcessor::replayCachedDiagnostics(
-    llvm::StringRef Buffer, CompilerInstance &Instance) {
-  return Impl.replayCachedDiagnostics(Buffer, Instance.getDiags());
+llvm::Error
+CachingDiagnosticsProcessor::replayCachedDiagnostics(llvm::StringRef Buffer) {
+  SmallVector<uint8_t, 512> Uncompressed;
+  uint32_t UncompressedSize =
+      llvm::support::endian::read<uint32_t, llvm::support::little>(
+          Buffer.data() + Buffer.size() - sizeof(uint32_t));
+  StringRef CompressedData = Buffer.drop_back(sizeof(uint32_t));
+  Uncompressed.resize(UncompressedSize);
+  if (llvm::compression::zstd::isAvailable()) {
+    if (auto E = llvm::compression::zstd::decompress(
+            arrayRefFromStringRef(CompressedData), Uncompressed,
+            UncompressedSize))
+      return E;
+  } else if (llvm::compression::zlib::isAvailable()) {
+    if (auto E = llvm::compression::zlib::decompress(
+            arrayRefFromStringRef(CompressedData), Uncompressed,
+            UncompressedSize))
+      return E;
+  }
+
+  StringRef InputBuffer =
+      Uncompressed.empty() ? Buffer : toStringRef(Uncompressed);
+
+  return Impl.replayCachedDiagnostics(InputBuffer);
 }

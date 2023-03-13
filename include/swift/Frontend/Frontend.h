@@ -30,6 +30,7 @@
 #include "swift/Basic/LangOptions.h"
 #include "swift/Basic/SourceManager.h"
 #include "swift/ClangImporter/ClangImporter.h"
+#include "swift/Frontend/CachedDiagnostics.h"
 #include "swift/Frontend/DiagnosticVerifier.h"
 #include "swift/Frontend/FrontendOptions.h"
 #include "swift/Frontend/ModuleInterfaceSupport.h"
@@ -460,6 +461,7 @@ class CompilerInstance {
   std::unique_ptr<ASTContext> Context;
   std::unique_ptr<Lowering::TypeConverter> TheSILTypes;
   std::unique_ptr<DiagnosticVerifier> DiagVerifier;
+  std::unique_ptr<CachingDiagnosticsProcessor> CDP;
 
   /// A cache describing the set of inter-module dependencies that have been queried.
   /// Null if not present.
@@ -544,6 +546,10 @@ public:
     return CAS;
   }
   Optional<llvm::cas::ObjectRef> getCompilerBaseKey() const { return BaseRef; }
+
+  CachingDiagnosticsProcessor *getCachingDiagnosticsProcessor() const {
+    return CDP.get();
+  }
 
   ASTContext &getASTContext() { return *Context; }
   const ASTContext &getASTContext() const { return *Context; }
@@ -670,6 +676,7 @@ private:
   void setupDependencyTrackerIfNeeded();
   bool setupCASIfNeeded(ArrayRef<const char *> Args);
   void setupOutputBackend();
+  void setupCachingDiagnosticsProcessorIfNeeded();
 
   /// \return false if successful, true on error.
   bool setupDiagnosticVerifierIfNeeded();

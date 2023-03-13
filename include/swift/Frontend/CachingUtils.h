@@ -13,6 +13,7 @@
 #ifndef SWIFT_FRONTEND_CACHINGUTILS_H
 #define SWIFT_FRONTEND_CACHINGUTILS_H
 
+#include "swift/Frontend/CachedDiagnostics.h"
 #include "swift/Frontend/FrontendInputsAndOutputs.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/CAS/ActionCache.h"
@@ -39,13 +40,22 @@ createSwiftCachingOutputBackend(
 bool replayCachedCompilerOutputs(
     llvm::cas::ObjectStore &CAS, llvm::cas::ActionCache &Cache,
     llvm::cas::ObjectRef BaseKey, DiagnosticEngine &Diag,
-    const FrontendInputsAndOutputs &InputsAndOutputs);
+    const FrontendInputsAndOutputs &InputsAndOutputs,
+    CachingDiagnosticsProcessor &CDP);
 
 /// Load the cached compile result from cache.
 std::unique_ptr<llvm::MemoryBuffer> loadCachedCompileResultFromCacheKey(
     llvm::cas::ObjectStore &CAS, llvm::cas::ActionCache &Cache,
     DiagnosticEngine &Diag, llvm::StringRef CacheKey,
     llvm::StringRef Filename = "");
+
+/// Store compiler output.
+llvm::Error storeCachedCompilerOutput(llvm::cas::ObjectStore &CAS,
+                                      llvm::cas::ActionCache &Cache,
+                                      StringRef Path, StringRef Bytes,
+                                      llvm::cas::ObjectRef BaseKey,
+                                      StringRef CorrespondingInput,
+                                      file_types::ID OutputKind);
 
 namespace cas {
 /// Helper class to manage CAS/Caching from libSwiftScan C APIs.

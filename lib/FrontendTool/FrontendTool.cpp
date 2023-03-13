@@ -1418,10 +1418,25 @@ static bool tryReplayCompilerResults(CompilerInstance &Instance) {
   assert(Instance.getCompilerBaseKey() &&
          "Instance is not setup correctly for replay");
 
-  return replayCachedCompilerOutputs(
+  auto *CDP = Instance.getCachingDiagnosticsProcessor();
+  assert(CDP && "CachingDiagnosticsProcessor needs to be setup for replay");
+
+  // Don't capture diagnostics from replay.
+  CDP->endCaptureDiagnostics();
+
+  bool replayed = replayCachedCompilerOutputs(
       Instance.getObjectStore(), Instance.getActionCache(),
       *Instance.getCompilerBaseKey(), Instance.getDiags(),
-      Instance.getInvocation().getFrontendOptions().InputsAndOutputs);
+      Instance.getInvocation().getFrontendOptions().InputsAndOutputs, *CDP);
+
+  // If we didn't replay successfully, re-start capture. Otherwise, disable
+  // capture so we don't try to save captured diagnostics.
+  if (!replayed)
+    CDP->startCaptureDiagnostics();
+  else
+    CDP->setDisableCapture();
+
+  return replayed;
 }
 
 /// Performs the compile requested by the user.
@@ -2111,9 +2126,6 @@ int swift::performFrontend(ArrayRef<const char *> Args,
   // In parseable output, avoid printing diagnostics
   Instance->addDiagnosticConsumer(&PDC);
 
-  // CachingDiagnosticsProcessor for round-tripping diagnostics.
-  std::unique_ptr<CachingDiagnosticsProcessor> CDP;
-
   struct FinishDiagProcessingCheckRAII {
     bool CalledFinishDiagProcessing = false;
     ~FinishDiagProcessingCheckRAII() {
@@ -2124,15 +2136,6 @@ int swift::performFrontend(ArrayRef<const char *> Args,
 
   auto finishDiagProcessing = [&](int retValue, bool verifierEnabled) -> int {
     FinishDiagProcessingCheckRAII.CalledFinishDiagProcessing = true;
-    if (CDP) {
-      CDP->endCaptureDiagnostics(Instance->getDiags());
-      llvm::SmallString<256> Text;
-      llvm::raw_svector_ostream OS(Text);
-      cantFail(CDP->serializeEmittedDiagnostics(OS));
-      if (llvm::sys::Process::GetEnv("PRINT_CACHE_DIAG"))
-        llvm::outs() << Text << "\n";
-      // cantFail(CDP->replayCachedDiagnostics(Text, *Instance));
-    }
     PDC.setSuppressOutput(false);
     bool diagnosticsError = Instance->getDiags().finishProcessing();
     // If the verifier is enabled and did not encounter any verification errors,
@@ -2378,11 +2381,6 @@ int swift::performFrontend(ArrayRef<const char *> Args,
       emitParseableFinishedMessage(ReturnCode);
 
     return finishDiagProcessing(ReturnCode, /*verifierEnabled*/ false);
-  }
-
-  if (llvm::sys::Process::GetEnv("ROUNDTRIP_CACHE_DIAG")) {
-    CDP = std::make_unique<CachingDiagnosticsProcessor>(*Instance);
-    CDP->startCaptureDiagnostics(Instance->getDiags());
   }
 
   // The compiler instance has been configured; notify our observer.
