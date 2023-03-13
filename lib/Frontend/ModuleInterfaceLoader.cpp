@@ -2241,9 +2241,11 @@ struct ExplicitCASModuleLoader::Implementation {
       auto cachePath = entry.getValue().moduleCacheKey;
       if (cachePath) {
         extraClangArgs.push_back("-Xclang");
-        extraClangArgs.push_back(
-            (Twine("-fmodule-file-cache-key=") + modulePath + "=" + *cachePath)
-                .str());
+        extraClangArgs.push_back("-fmodule-file-cache-key");
+        extraClangArgs.push_back("-Xclang");
+        extraClangArgs.push_back(modulePath);
+        extraClangArgs.push_back("-Xclang");
+        extraClangArgs.push_back(*cachePath);
       }
     }
   }

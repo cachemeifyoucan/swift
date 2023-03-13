@@ -373,15 +373,20 @@ static llvm::Error resolveExplicitModuleInputs(
       commandLine.push_back("-fmodule-map-file=" +
                             clangDepDetails->moduleMapFile);
       if (!clangDepDetails->moduleCacheKey.empty()) {
-        if (!resolvingDepInfo.isClangModule()) {
-          // clang module build using cc1 arg so this is not needed.
+        auto appendXclang = [&]() {
+          if (!resolvingDepInfo.isClangModule()) {
+            // clang module build using cc1 arg so this is not needed.
+            commandLine.push_back("-Xcc");
+            commandLine.push_back("-Xclang");
+          }
           commandLine.push_back("-Xcc");
-          commandLine.push_back("-Xclang");
-        }
-        commandLine.push_back("-Xcc");
-        commandLine.push_back(
-            "-fmodule-file-cache-key=" + clangDepDetails->pcmOutputPath + "=" +
-            clangDepDetails->moduleCacheKey);
+        };
+        appendXclang();
+        commandLine.push_back("-fmodule-file-cache-key");
+        appendXclang();
+        commandLine.push_back(clangDepDetails->pcmOutputPath);
+        appendXclang();
+        commandLine.push_back(clangDepDetails->moduleCacheKey);
       }
 
       // Only need to merge the CASFS from clang importer.
