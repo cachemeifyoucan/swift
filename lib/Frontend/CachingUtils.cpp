@@ -321,8 +321,9 @@ CachingTool::CachingTool(StringRef Path) {
   Cache = std::move(DB->second);
 }
 
-std::string CachingTool::computeCacheKeyForPCH(ArrayRef<const char *> Args,
-                                               StringRef HeaderPath) {
+std::string CachingTool::computeCacheKey(ArrayRef<const char *> Args,
+                                         StringRef InputPath,
+                                         file_types::ID OutputKind) {
   auto BaseKey = createCompileJobBaseCacheKey(*CAS, Args);
   if (!BaseKey) {
     llvm::errs() << "Failed to create cache key: "
@@ -330,15 +331,15 @@ std::string CachingTool::computeCacheKeyForPCH(ArrayRef<const char *> Args,
     return "";
   }
 
-  auto PCHKey = createCompileJobCacheKeyForOutput(*CAS, *BaseKey, HeaderPath,
-                                                  file_types::ID::TY_PCH);
-  if (!PCHKey) {
-    llvm::errs() << "Failed to create cache key: "
-                 << toString(PCHKey.takeError()) << "\n";
+  auto Key =
+      createCompileJobCacheKeyForOutput(*CAS, *BaseKey, InputPath, OutputKind);
+  if (!Key) {
+    llvm::errs() << "Failed to create cache key: " << toString(Key.takeError())
+                 << "\n";
     return "";
   }
 
-  return CAS->getID(*PCHKey).toString();
+  return CAS->getID(*Key).toString();
 }
 
 std::string CachingTool::storeContent(StringRef Content) {

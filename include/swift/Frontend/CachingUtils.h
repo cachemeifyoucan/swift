@@ -55,8 +55,8 @@ public:
   CachingTool(llvm::StringRef Path);
 
   // Compute the CASID for PCH output from invocation.
-  std::string computeCacheKeyForPCH(llvm::ArrayRef<const char *> Args,
-                                    StringRef HeaderPath);
+  std::string computeCacheKey(llvm::ArrayRef<const char *> Args,
+                              StringRef InputPath, file_types::ID OutputKind);
 
   // Store content into CAS.
   std::string storeContent(llvm::StringRef Content);

@@ -75,5 +75,5 @@ swiftscan_diagnostics_set_dispose
 swiftscan_cas_create
 swiftscan_cas_dispose
 swiftscan_cas_store
-swiftscan_compute_cache_key_pch
+swiftscan_compute_cache_key
 invoke_swift_compiler

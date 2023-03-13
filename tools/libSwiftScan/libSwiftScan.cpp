@@ -662,22 +662,40 @@ swiftscan_cas_t swiftscan_cas_create(const char *path) {
 
 void swiftscan_cas_dispose(swiftscan_cas_t cas) { delete unwrap(cas); }
 
-swiftscan_string_ref_t swiftscan_compute_cache_key_pch(swiftscan_cas_t cas,
-                                                       int argc,
-                                                       const char **argv,
-                                                       const char *header) {
-  std::vector<const char *> Compilation;
-  for (int i = 0; i < argc; ++i)
-    Compilation.push_back(argv[i]);
-
-  auto ID = unwrap(cas)->computeCacheKeyForPCH(Compilation, header);
-  return swift::c_string_utils::create_clone(ID.c_str());
-}
-
 swiftscan_string_ref_t
 swiftscan_cas_store(swiftscan_cas_t cas, uint8_t *data, unsigned size) {
   llvm::StringRef StrContent((char*)data, size);
   auto ID = unwrap(cas)->storeContent(StrContent);
+  return swift::c_string_utils::create_clone(ID.c_str());
+}
+
+static swift::file_types::ID
+getFileTypeFromScanOutputKind(swiftscan_output_kind_t kind) {
+  switch (kind) {
+  case SWIFTSCAN_OUTPUT_TYPE_OBJECT:
+    return swift::file_types::ID::TY_Object;
+  case SWIFTSCAN_OUTPUT_TYPE_SWIFTMODULE:
+    return swift::file_types::ID::TY_SwiftModuleFile;
+  case SWIFTSCAN_OUTPUT_TYPE_SWIFTINTERFACE:
+    return swift::file_types::ID::TY_SwiftModuleInterfaceFile;
+  case SWIFTSCAN_OUTPUT_TYPE_SWIFTPRIAVEINTERFACE:
+    return swift::file_types::ID::TY_PrivateSwiftModuleInterfaceFile;
+  case SWIFTSCAN_OUTPUT_TYPE_CLANG_MODULE:
+    return swift::file_types::ID::TY_ClangModuleFile;
+  case SWIFTSCAN_OUTPUT_TYPE_CLANG_PCH:
+    return swift::file_types::ID::TY_PCH;
+  }
+}
+
+swiftscan_string_ref_t
+swiftscan_compute_cache_key(swiftscan_cas_t cas, int argc, const char **argv,
+                            const char *input, swiftscan_output_kind_t kind) {
+  std::vector<const char *> Compilation;
+  for (int i = 0; i < argc; ++i)
+    Compilation.push_back(argv[i]);
+
+  auto ID = unwrap(cas)->computeCacheKey(Compilation, input,
+                                         getFileTypeFromScanOutputKind(kind));
   return swift::c_string_utils::create_clone(ID.c_str());
 }
 
