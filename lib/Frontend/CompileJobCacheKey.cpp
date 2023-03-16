@@ -31,7 +31,7 @@ llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
   // TODO: Improve this list.
   static const std::vector<std::string> removeArgAndNext = {
       "-o", "-supplementary-output-file-map", "-serialize-diagnostics-path",
-      "-num-threads"};
+      "-num-threads", "-prefix-mapper"};
 
   // Don't count the `-frontend` in the first location since only frontend
   // invocation can have a cache key.

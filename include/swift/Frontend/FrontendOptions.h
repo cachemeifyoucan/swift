@@ -21,6 +21,7 @@
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/Support/PrefixMapper.h"
 
 #include <string>
 #include <vector>

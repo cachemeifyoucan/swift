@@ -314,7 +314,11 @@ void SwiftDependencyTracker::startTracking() {
 
 llvm::Expected<llvm::cas::ObjectProxy>
 SwiftDependencyTracker::createTreeFromDependencies() {
-  return FS.createTreeFromNewAccesses();
+  return FS.createTreeFromNewAccesses(
+      [&](const llvm::vfs::CachedDirectoryEntry &Entry,
+          SmallVectorImpl<char> &Storage) {
+        return Mapper.mapDirEntry(Entry, Storage);
+      });
 }
 
 void SwiftDependencyScanningService::overlaySharedFilesystemCacheForCompilation(CompilerInstance &Instance) {
@@ -331,6 +335,8 @@ void SwiftDependencyScanningService::setupCachingDependencyScanningService(
     CompilerInstance &Instance) {
   if (!Instance.getInvocation().getFrontendOptions().EnableCAS)
     return;
+
+  PathPrefixMapper = Instance.getPrefixMapper();
 
   // Add SDKSetting file.
   SmallString<PATH_MAX> SDKSettingPath;
@@ -352,7 +358,8 @@ void SwiftDependencyScanningService::setupCachingDependencyScanningService(
       CommonDependencyFiles.emplace_back(F->path().str());
   }
 
-  auto CachingFS = llvm::cas::createCachingOnDiskFileSystem(Instance.getObjectStore());
+  auto CachingFS =
+      llvm::cas::createCachingOnDiskFileSystem(Instance.getObjectStore());
   if (!CachingFS) {
     Instance.getDiags().diagnose(SourceLoc(), diag::error_create_cas,
                                  "CachingOnDiskFS",

@@ -53,6 +53,7 @@
 #include "llvm/Support/HashingOutputBackend.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/PrefixMapper.h"
 #include "llvm/Support/VirtualOutputBackend.h"
 
 #include <memory>
@@ -463,6 +464,8 @@ class CompilerInstance {
   std::unique_ptr<DiagnosticVerifier> DiagVerifier;
   std::unique_ptr<CachingDiagnosticsProcessor> CDP;
 
+  llvm::Optional<llvm::TreePathPrefixMapper> PathPrefixMapper;
+
   /// A cache describing the set of inter-module dependencies that have been queried.
   /// Null if not present.
   std::unique_ptr<ModuleDependenciesCache> ModDepCache;
@@ -537,6 +540,9 @@ public:
   using HashingBackendPtrTy = llvm::IntrusiveRefCntPtr<HashBackendTy>;
   HashingBackendPtrTy getHashingBackend() { return HashBackend; }
 
+  llvm::Optional<llvm::TreePathPrefixMapper> getPrefixMapper() const {
+    return PathPrefixMapper;
+  }
   llvm::cas::ObjectStore &getObjectStore() const { return *CAS; }
   llvm::cas::ActionCache &getActionCache() const { return *Cache; }
   std::shared_ptr<llvm::cas::ActionCache> getSharedCacheInstance() const {

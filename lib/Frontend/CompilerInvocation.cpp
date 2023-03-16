@@ -1612,6 +1612,12 @@ static bool ParseSearchPathArgs(SearchPathOptions &Opts,
   Opts.setCompilerPluginExecutablePaths(
       std::move(CompilerPluginExecutablePaths));
 
+  for (auto A: Args.getAllArgValues(options::OPT_prefix_mapper)) {
+    auto SplitMap = StringRef(A).split('=');
+    Opts.PathPrefixMapper.emplace_back(SplitMap.first.str(),
+                                       SplitMap.second.str());
+  }
+
   return false;
 }
 

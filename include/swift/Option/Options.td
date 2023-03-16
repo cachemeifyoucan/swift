@@ -1818,6 +1818,9 @@ def bridging_header_pch_key : Separate<["-"], "bridging-header-pch-key">,
   Flags<[FrontendOption, HelpHidden, ArgumentIsPath]>,
   HelpText<"Cache Key for bridging header pch">;
 
+def prefix_mapper: Separate<["-"], "prefix-mapper">, Flags<[FrontendOption]>,
+  HelpText<"Remap the path in file system">, MetaVarName<"<real>=<remapped>">;
+
 // END ONLY SUPPORTED IN NEW DRIVER
 
 def load_plugin_library:

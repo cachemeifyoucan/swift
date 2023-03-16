@@ -30,6 +30,7 @@
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/PrefixMapper.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include <string>
 #include <vector>
@@ -673,8 +674,9 @@ using ModuleDependenciesKindRefMap =
 class SwiftDependencyTracker {
 public:
   SwiftDependencyTracker(llvm::cas::CachingOnDiskFileSystem &FS,
-                         const std::vector<std::string> &CommonFiles)
-      : FS(FS), Files(CommonFiles) {}
+                         const std::vector<std::string> &CommonFiles,
+                         llvm::TreePathPrefixMapper &Mapper)
+      : FS(FS), Files(CommonFiles), Mapper(Mapper) {}
 
   void startTracking();
   void trackFile(const Twine &path) { (void)FS.status(path); }
@@ -683,6 +685,7 @@ public:
 private:
   llvm::cas::CachingOnDiskFileSystem &FS;
   const std::vector<std::string> &Files;
+  llvm::TreePathPrefixMapper &Mapper;
 };
 
 // MARK: SwiftDependencyScanningService
@@ -716,6 +719,9 @@ class SwiftDependencyScanningService {
 
   /// The common dependencies that is needed for every swift compiler instance.
   std::vector<std::string> CommonDependencyFiles;
+
+  /// PrefixMapper for dependencies.
+  llvm::Optional<llvm::TreePathPrefixMapper> PathPrefixMapper;
 
   /// The global file system cache.
   Optional<
@@ -774,11 +780,12 @@ public:
     return *CacheFS;
   }
 
-  Optional<SwiftDependencyTracker> createSwiftDependencyTracker() const {
-    if (!CacheFS)
+  Optional<SwiftDependencyTracker> createSwiftDependencyTracker() {
+    if (!CacheFS || !PathPrefixMapper)
       return None;
 
-    return SwiftDependencyTracker(*CacheFS, CommonDependencyFiles);
+    return SwiftDependencyTracker(*CacheFS, CommonDependencyFiles,
+                                  *PathPrefixMapper);
   }
 
   llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> getClangScanningFS() const {

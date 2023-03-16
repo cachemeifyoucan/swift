@@ -438,6 +438,9 @@ public:
   /// original form.
   PathObfuscator DeserializedPathRecoverer;
 
+  /// Prefix Mapper for FileSystem.
+  std::vector<std::pair<std::string, std::string>> PathPrefixMapper;
+
   /// Return all module search paths that (non-recursively) contain a file whose
   /// name is in \p Filenames.
   SmallVector<const ModuleSearchPath *, 4>

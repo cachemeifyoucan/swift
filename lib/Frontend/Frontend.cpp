@@ -595,6 +595,12 @@ bool CompilerInstance::setUpVirtualFileSystemOverlays() {
   }
 
   SourceMgr.setFileSystem(*ExpectedOverlay);
+
+  PathPrefixMapper.emplace(SourceMgr.getFileSystem());
+  for (auto &Map : Invocation.getSearchPathOptions().PathPrefixMapper)
+    PathPrefixMapper->add({Map.first, Map.second});
+  PathPrefixMapper->sort();
+
   return false;
 }
 
