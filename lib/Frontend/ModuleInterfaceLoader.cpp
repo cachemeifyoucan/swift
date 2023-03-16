@@ -43,6 +43,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Errc.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/VirtualOutputBackend.h"
 #include "llvm/Support/YAMLParser.h"
@@ -2290,6 +2291,19 @@ struct ExplicitCASModuleLoader::Implementation {
 
     return buf->getMemoryBuffer(Name);
   }
+
+  llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
+  loadModuleFromPath(StringRef Path, DiagnosticEngine &Diags) {
+    for (auto &Deps : ExplicitModuleMap) {
+      if (Deps.second.modulePath == Path) {
+        if (!Deps.second.moduleCacheKey)
+          return nullptr;
+        return loadCachedCompileResultFromCacheKey(
+            CAS, Cache, Diags, *Deps.second.moduleCacheKey, Path);
+      }
+    }
+    return nullptr;
+  }
 };
 
 ExplicitCASModuleLoader::ExplicitCASModuleLoader(ASTContext &ctx,
@@ -2352,13 +2366,22 @@ bool ExplicitCASModuleLoader::findModule(
       !serialization::isSerializedAST(moduleBuf->getBuffer());
   // If the module is a forwarding module, read the actual content from the path
   // encoded in the forwarding module as the actual module content.
-  // TODO: need to figure out how fowarding module works.
   if (isForwardingModule) {
     auto forwardingModule = ForwardingModule::load(*moduleBuf.get());
     if (forwardingModule) {
-      moduleBuf = loadCachedCompileResultFromCacheKey(
-          Impl.CAS, Impl.Cache, Ctx.Diags,
-          forwardingModule->underlyingModulePath);
+      // Look through ExplicitModuleMap for paths.
+      // TODO: need to have dependency scanner reports forwarded module as
+      // dependency for this compilation and ingested into CAS.
+      auto moduleOrErr = Impl.loadModuleFromPath(
+          forwardingModule->underlyingModulePath, Ctx.Diags);
+      if (!moduleOrErr) {
+        llvm::consumeError(moduleOrErr.takeError());
+        Ctx.Diags.diagnose(SourceLoc(),
+                           diag::error_opening_explicit_module_file,
+                           moduleInfo.modulePath);
+        return false;
+      }
+      moduleBuf = std::move(*moduleOrErr);
       if (!moduleBuf) {
         // We cannot read the module content, diagnose.
         Ctx.Diags.diagnose(SourceLoc(),
