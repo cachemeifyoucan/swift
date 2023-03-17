@@ -1412,7 +1412,7 @@ static bool performAction(CompilerInstance &Instance,
 /// Return true if all the outputs are fetched from cache. Otherwise, return
 /// false and will not replay any output.
 static bool tryReplayCompilerResults(CompilerInstance &Instance) {
-  if (!Instance.getInvocation().getFrontendOptions().EnableCAS)
+  if (!Instance.supportCaching())
     return false;
 
   assert(Instance.getCompilerBaseKey() &&

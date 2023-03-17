@@ -452,7 +452,7 @@ void CompilerInstance::setupOutputBackend() {
       llvm::makeIntrusiveRefCnt<llvm::vfs::OnDiskOutputBackend>();
 
   // Mirror the output into CAS.
-  if (Invocation.getFrontendOptions().EnableCAS) {
+  if (supportCaching()) {
     auto CASOutputBackend = createSwiftCachingOutputBackend(
         *CAS, *Cache, *BaseRef,
         Invocation.getFrontendOptions().InputsAndOutputs);
@@ -472,7 +472,7 @@ void CompilerInstance::setupOutputBackend() {
 }
 
 void CompilerInstance::setupCachingDiagnosticsProcessorIfNeeded() {
-  if (!Invocation.getFrontendOptions().EnableCAS)
+  if (!supportCaching())
     return;
 
   // Only setup if using CAS.
@@ -1098,6 +1098,14 @@ bool CompilerInstance::canImportCxxShim() const {
   auto modulePath = builder.get();
   return getASTContext().canImportModule(modulePath) &&
          !Invocation.getFrontendOptions().InputsAndOutputs.hasModuleInterfaceOutputPath();
+}
+
+bool CompilerInstance::supportCaching() const {
+  if (!Invocation.getFrontendOptions().EnableCAS)
+    return false;
+
+  return FrontendOptions::supportCompilationCaching(
+      Invocation.getFrontendOptions().RequestedAction);
 }
 
 ImplicitImportInfo CompilerInstance::getImplicitImportInfo() const {
