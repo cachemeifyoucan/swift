@@ -294,15 +294,16 @@ void ModuleDependencyInfo::addBridgingModuleDependency(
   }
 }
 
-SwiftDependencyScanningService::SwiftDependencyScanningService()
-  : ClangScanningService(clang::tooling::dependencies::ScanningMode::DependencyDirectivesScan,
-                         clang::tooling::dependencies::ScanningOutputFormat::Full,
-                         clang::CASOptions(),
-                         /* CAS (llvm::cas::ObjectStore) */ nullptr,
-                         /* Cache (llvm::cas::ActionCache) */ nullptr,
-                         /* SharedFS */ nullptr,
-                         /* OptimizeArgs */ true) {
-    SharedFilesystemCache.emplace();
+SwiftDependencyScanningService::SwiftDependencyScanningService() {
+  ClangScanningService.emplace(
+      clang::tooling::dependencies::ScanningMode::DependencyDirectivesScan,
+      clang::tooling::dependencies::ScanningOutputFormat::Full,
+      clang::CASOptions(),
+      /* CAS (llvm::cas::ObjectStore) */ nullptr,
+      /* Cache (llvm::cas::ActionCache) */ nullptr,
+      /* SharedFS */ nullptr,
+      /* OptimizeArgs */ true);
+  SharedFilesystemCache.emplace();
 }
 
 void SwiftDependencyTracker::startTracking() {
@@ -373,10 +374,11 @@ void SwiftDependencyScanningService::setupCachingDependencyScanningService(
   CASOpts.ensurePersistentCAS();
 
   ClangScanningService.emplace(
-          clang::tooling::dependencies::ScanningMode::DependencyDirectivesScan,
-          clang::tooling::dependencies::ScanningOutputFormat::FullTree,
-          CASOpts, Instance.getSharedCacheInstance(), CacheFS,
-          /* ReuseFileManager */ false, /* OptimizeArgs */ false);
+      clang::tooling::dependencies::ScanningMode::DependencyDirectivesScan,
+      clang::tooling::dependencies::ScanningOutputFormat::FullTree, CASOpts,
+      Instance.getSharedCASInstance(), Instance.getSharedCacheInstance(),
+      CacheFS,
+      /* ReuseFileManager */ false, /* OptimizeArgs */ false);
 }
 
 SwiftDependencyScanningService::ContextSpecificGlobalCacheState *

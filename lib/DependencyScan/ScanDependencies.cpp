@@ -424,9 +424,8 @@ static llvm::Error resolveExplicitModuleInputs(
   // Handle CAS options.
   if (instance.getInvocation().getFrontendOptions().EnableCAS) {
     // Merge CASFS from clang dependency.
-    auto CASFS = cache.getScanService().getSharedCachingFS();
-    assert(CASFS && "Expect CASFS");
-    auto &CAS = CASFS->getCAS();
+    auto &CASFS = cache.getScanService().getSharedCachingFS();
+    auto &CAS = CASFS.getCAS();
 
     // Update CASFS RootID.
     if (resolvingDepInfo.isSwiftInterfaceModule() ||
@@ -457,7 +456,7 @@ static llvm::Error resolveExplicitModuleInputs(
       // action cache.
       if (auto *binaryDep = dependencyInfoCopy.getAsSwiftBinaryModule()) {
         auto Ref =
-            CASFS->getObjectRefForFileContent(binaryDep->compiledModulePath);
+            CASFS.getObjectRefForFileContent(binaryDep->compiledModulePath);
         if (!Ref)
           return llvm::errorCodeToError(Ref.getError());
         assert(*Ref && "Binary module should be loaded into CASFS already");
