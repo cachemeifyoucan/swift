@@ -1166,8 +1166,10 @@ ClangImporter::create(ASTContext &ctx,
   auto fileMapping = getClangInvocationFileMapping(ctx);
   // Wrap Swift's FS to allow Clang to override the working directory
   llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS =
-      llvm::vfs::RedirectingFileSystem::create(
-          fileMapping.redirectedFiles, true, *ctx.SourceMgr.getFileSystem());
+      ctx.SourceMgr.getFileSystem();
+  if (!fileMapping.redirectedFiles.empty())
+    VFS = llvm::vfs::RedirectingFileSystem::create(
+        fileMapping.redirectedFiles, true, *ctx.SourceMgr.getFileSystem());
   if (!fileMapping.overridenFiles.empty()) {
     llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> overridenVFS =
         new llvm::vfs::InMemoryFileSystem();

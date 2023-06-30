@@ -377,29 +377,35 @@ static Expected<ObjectRef> mergeCASFileSystem(ObjectStore &CAS,
 }
 
 Expected<IntrusiveRefCntPtr<vfs::FileSystem>>
-createCASFileSystem(ObjectStore &CAS, ArrayRef<std::string> FSRoots,
-                    ArrayRef<std::string> IncludeTrees) {
-  assert(!FSRoots.empty() || !IncludeTrees.empty() && "no root ID provided");
-  if (FSRoots.size() == 1 && IncludeTrees.empty()) {
+createCASFileSystem(ObjectStore &CAS, ArrayRef<std::string> FSRoots) {
+  if (FSRoots.empty())
+    return nullptr;
+
+  if (FSRoots.size() == 1) {
     auto ID = CAS.parseID(FSRoots.front());
     if (!ID)
       return ID.takeError();
-    auto Ref = CAS.getReference(*ID);
-    if (!Ref)
-      return createCASObjectNotFoundError(*ID);
+
+    return createCASFileSystem(CAS, *ID);
   }
 
   auto NewRoot = mergeCASFileSystem(CAS, FSRoots);
   if (!NewRoot)
     return NewRoot.takeError();
 
-  auto FS = createCASFileSystem(CAS, CAS.getID(*NewRoot));
-  if (!FS)
-    return FS.takeError();
+  return createCASFileSystem(CAS, CAS.getID(*NewRoot));
+}
 
-  auto CASFS = makeIntrusiveRefCnt<vfs::OverlayFileSystem>(std::move(*FS));
-  // Push all Include File System onto overlay.
-  for (auto &Tree : IncludeTrees) {
+Expected<IntrusiveRefCntPtr<vfs::FileSystem>>
+createIncludeTreeFileSystem(ObjectStore &CAS,
+                            ArrayRef<std::string> IncludeTreeRoots) {
+  if (IncludeTreeRoots.empty())
+    return nullptr;
+
+  IntrusiveRefCntPtr<clang::cas::IncludeTreeFileSystem> IncludeTreeFS =
+      new clang::cas::IncludeTreeFileSystem(CAS);
+
+  for (const auto &Tree : IncludeTreeRoots) {
     auto ID = CAS.parseID(Tree);
     if (!ID)
       return ID.takeError();
@@ -411,13 +417,11 @@ createCASFileSystem(ObjectStore &CAS, ArrayRef<std::string> FSRoots,
     if (!IT)
       return IT.takeError();
 
-    auto ITFS = clang::cas::createIncludeTreeFileSystem(*IT);
-    if (!ITFS)
-      return ITFS.takeError();
-    CASFS->pushOverlay(std::move(*ITFS));
-  }
+    if (auto E = IncludeTreeFS->addFilesFromIncludeTree(*IT))
+      return std::move(E);
+  };
 
-  return CASFS;
+  return IncludeTreeFS;
 }
 
 namespace cas {

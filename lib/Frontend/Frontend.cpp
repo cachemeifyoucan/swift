@@ -523,16 +523,33 @@ bool CompilerInstance::setUpVirtualFileSystemOverlays() {
   if (Invocation.getFrontendOptions().EnableCaching &&
       (!Invocation.getFrontendOptions().CASFSRootIDs.empty() ||
        !Invocation.getFrontendOptions().ClangIncludeTrees.empty())) {
-    // Set up CASFS as BaseFS.
+    // Set up FileSystem from CAS.
     const auto &Opts = getInvocation().getFrontendOptions();
-    auto FS =
-        createCASFileSystem(*CAS, Opts.CASFSRootIDs, Opts.ClangIncludeTrees);
-    if (!FS) {
+    auto CASFS =
+        createCASFileSystem(*CAS, Opts.CASFSRootIDs);
+    if (!CASFS) {
       Diagnostics.diagnose(SourceLoc(), diag::error_cas,
-                           toString(FS.takeError()));
+                           toString(CASFS.takeError()));
       return true;
     }
-    SourceMgr.setFileSystem(std::move(*FS));
+    auto IncludeTreeFS =
+        createIncludeTreeFileSystem(*CAS, Opts.ClangIncludeTrees);
+    if (!IncludeTreeFS) {
+      Diagnostics.diagnose(SourceLoc(), diag::error_cas,
+                           toString(IncludeTreeFS.takeError()));
+      return true;
+    }
+    // If both FS exists, overlay them, otherwise, use one or the other as
+    // BaseFS.
+    if (*CASFS && *IncludeTreeFS) {
+      llvm::IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> OverlayVFS =
+          new llvm::vfs::OverlayFileSystem(std::move(*CASFS));
+      OverlayVFS->pushOverlay(*IncludeTreeFS);
+      SourceMgr.setFileSystem(std::move(OverlayVFS));
+    } else if (*CASFS)
+      SourceMgr.setFileSystem(std::move(*CASFS));
+    else
+      SourceMgr.setFileSystem(*IncludeTreeFS);
   }
 
   // If we have a bridging header cache key, try load it now and overlay it.

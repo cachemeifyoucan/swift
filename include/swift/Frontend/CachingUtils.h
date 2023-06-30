@@ -56,8 +56,11 @@ llvm::Error storeCachedCompilerOutput(llvm::cas::ObjectStore &CAS,
                                       file_types::ID OutputKind);
 
 llvm::Expected<llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>>
-createCASFileSystem(llvm::cas::ObjectStore &CAS, ArrayRef<std::string> FSRoots,
-                    ArrayRef<std::string> IncludeTreeRoots);
+createCASFileSystem(llvm::cas::ObjectStore &CAS, ArrayRef<std::string> FSRoots);
+
+llvm::Expected<llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>>
+createIncludeTreeFileSystem(llvm::cas::ObjectStore &CAS,
+                            ArrayRef<std::string> IncludeTreeRoots);
 
 namespace cas {
 /// Helper class to manage CAS/Caching from libSwiftScan C APIs.
