@@ -116,7 +116,7 @@ public:
                                   const std::vector<std::string> &moduleImports,
                                   StringRef moduleCacheKey = "")
       : dependencyKind(dependencyKind), moduleImports(moduleImports),
-        moduleCacheKey(moduleCacheKey.str()), resolved(false)  {}
+        moduleCacheKey(moduleCacheKey.str()), resolved(false), finalized(false)  {}
 
   virtual ModuleDependencyInfoStorageBase *clone() const = 0;
 
@@ -137,7 +137,11 @@ public:
   /// The cache key for the produced module.
   std::string moduleCacheKey;
 
+  /// The direct dependency of the module is resolved by scanner.
   bool resolved;
+  /// ModuleDependencyInfo is finalized (with all transitive dependencies
+  /// and inputs).
+  bool finalized;
 };
 
 struct CommonSwiftTextualModuleDependencyDetails {
@@ -602,6 +606,13 @@ public:
   }
   void setIsResolved(bool isResolved) {
     storage->resolved = isResolved;
+  }
+
+  bool isFinalized() const {
+    return storage->finalized;
+  }
+  void setIsFinalized(bool isFinalized) {
+    storage->finalized = isFinalized;
   }
 
   /// For a Source dependency, register a `Testable` import
