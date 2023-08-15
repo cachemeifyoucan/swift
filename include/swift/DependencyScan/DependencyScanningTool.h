@@ -95,6 +95,8 @@ public:
   const std::vector<DependencyScannerDiagnosticCollectingConsumer::ScannerDiagnosticInfo>& getDiagnostics() const { return CDC.Diagnostics; }
   /// Discared the collection of diagnostics encountered so far.
   void resetDiagnostics();
+  /// Add dependency scanning error.
+  void addExtraError(llvm::Error &&Err);
 
   /// Using the specified invocation command, instantiate a CompilerInstance
   /// that will be used for this scan.

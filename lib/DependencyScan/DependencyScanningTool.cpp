@@ -289,5 +289,14 @@ DependencyScanningTool::initCompilerInstanceForScan(
   return Instance;
 }
 
+void DependencyScanningTool::addExtraError(llvm::Error &&Err) {
+  llvm::sys::SmartScopedLock<true> Lock(DependencyScanningToolStateLock);
+  SourceManager SM;
+  DiagnosticEngine Diags(SM);
+  Diags.addConsumer(CDC);
+  Diags.diagnose(SourceLoc(), diag::error_scanner_extra,
+                 toString(std::move(Err)));
+}
+
 } // namespace dependencies
 } // namespace swift
