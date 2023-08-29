@@ -312,6 +312,8 @@ static llvm::Error resolveExplicitModuleInputs(
   if (resolvingDepInfo.isFinalized())
     return llvm::Error::success();
 
+  auto &service = cache.getScanService();
+  auto remapPath = [&](StringRef path) { return service.remapPath(path); };
   std::vector<std::string> rootIDs;
   if (auto ID = resolvingDepInfo.getCASFSRootID())
     rootIDs.push_back(*ID);
@@ -377,7 +379,7 @@ static llvm::Error resolveExplicitModuleInputs(
         commandLine.push_back("-Xcc");
         commandLine.push_back("-include-pch");
         commandLine.push_back("-Xcc");
-        commandLine.push_back(headerDep);
+        commandLine.push_back(remapPath(headerDep));
       }
     } break;
     case swift::ModuleDependencyKind::SwiftPlaceholder: {
@@ -392,7 +394,7 @@ static llvm::Error resolveExplicitModuleInputs(
       if (!resolvingDepInfo.isClangModule()) {
         commandLine.push_back("-Xcc");
         commandLine.push_back("-fmodule-file=" + depModuleID.first + "=" +
-                              clangDepDetails->pcmOutputPath);
+                              remapPath(clangDepDetails->pcmOutputPath));
         if (!instance.getInvocation()
                  .getClangImporterOptions()
                  .UseClangIncludeTree) {
@@ -413,7 +415,7 @@ static llvm::Error resolveExplicitModuleInputs(
         appendXclang();
         commandLine.push_back("-fmodule-file-cache-key");
         appendXclang();
-        commandLine.push_back(clangDepDetails->pcmOutputPath);
+        commandLine.push_back(remapPath(clangDepDetails->pcmOutputPath));
         appendXclang();
         commandLine.push_back(clangDepDetails->moduleCacheKey);
       }
@@ -478,7 +480,7 @@ static llvm::Error resolveExplicitModuleInputs(
           newCommandLine.push_back("-Xcc");
           newCommandLine.push_back("-fmodule-file-cache-key");
           newCommandLine.push_back("-Xcc");
-          newCommandLine.push_back(clangDep->pcmOutputPath);
+          newCommandLine.push_back(remapPath(clangDep->pcmOutputPath));
           newCommandLine.push_back("-Xcc");
           newCommandLine.push_back(clangDep->moduleCacheKey);
         }

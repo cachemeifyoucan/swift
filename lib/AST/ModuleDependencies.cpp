@@ -22,6 +22,7 @@
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/PrefixMapper.h"
 #include <system_error>
 using namespace swift;
 
@@ -423,7 +424,11 @@ void SwiftDependencyTracker::startTracking() {
 
 llvm::Expected<llvm::cas::ObjectProxy>
 SwiftDependencyTracker::createTreeFromDependencies() {
-  return FS->createTreeFromNewAccesses();
+  return FS->createTreeFromNewAccesses(
+      [&](const llvm::vfs::CachedDirectoryEntry &Entry,
+          llvm::SmallVectorImpl<char> &Storage) {
+        return Mapper.mapDirEntry(Entry, Storage);
+      });
 }
 
 void SwiftDependencyScanningService::overlaySharedFilesystemCacheForCompilation(
@@ -487,6 +492,19 @@ bool SwiftDependencyScanningService::setupCachingDependencyScanningService(
     return true;
   }
   CacheFS = std::move(*CachingFS);
+
+  // Setup prefix mapping.
+  Mapper = std::make_unique<llvm::TreePathPrefixMapper>(CacheFS);
+  SmallVector<llvm::MappedPrefix, 4> Prefixes;
+  if (auto E = llvm::MappedPrefix::transformJoined(
+          Instance.getInvocation().getSearchPathOptions().ScannerPrefixMapper,
+          Prefixes)) {
+    Instance.getDiags().diagnose(SourceLoc(), diag::error_prefix_mapping,
+                                 toString(std::move(E)));
+    return true;
+  }
+  Mapper->addRange(Prefixes);
+
 
   UseClangIncludeTree =
       Instance.getInvocation().getClangImporterOptions().UseClangIncludeTree;
