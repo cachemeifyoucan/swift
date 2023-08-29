@@ -886,6 +886,9 @@ public:
     return llvm::vfs::createPhysicalFileSystem();
   }
 
+  bool hasPathMapping() const {
+    return Mapper && !Mapper->getMappings().empty();
+  }
   std::string remapPath(StringRef Path) { return Mapper->mapToString(Path); }
 
   /// Wrap the filesystem on the specified `CompilerInstance` with a

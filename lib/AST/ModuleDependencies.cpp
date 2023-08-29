@@ -504,7 +504,7 @@ bool SwiftDependencyScanningService::setupCachingDependencyScanningService(
     return true;
   }
   Mapper->addRange(Prefixes);
-
+  Mapper->sort();
 
   UseClangIncludeTree =
       Instance.getInvocation().getClangImporterOptions().UseClangIncludeTree;
