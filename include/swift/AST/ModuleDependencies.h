@@ -889,7 +889,11 @@ public:
   bool hasPathMapping() const {
     return Mapper && !Mapper->getMappings().empty();
   }
-  std::string remapPath(StringRef Path) { return Mapper->mapToString(Path); }
+  std::string remapPath(StringRef Path) {
+    if (!Mapper)
+      return Path.str();
+    return Mapper->mapToString(Path);
+  }
 
   /// Wrap the filesystem on the specified `CompilerInstance` with a
   /// caching `DependencyScanningWorkerFilesystem`
