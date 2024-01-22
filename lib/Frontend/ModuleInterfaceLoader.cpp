@@ -1685,6 +1685,8 @@ void InterfaceSubContextDelegateImpl::inheritOptionsForBuildingInterface(
     genericSubInvocation.getCASOptions().CASOpts = casOpts.CASOpts;
     casOpts.enumerateCASConfigurationFlags(
         [&](StringRef Arg) { GenericArgs.push_back(ArgSaver.save(Arg)); });
+    // ClangIncludeTree is default on when caching is enabled.
+    genericSubInvocation.getClangImporterOptions().UseClangIncludeTree = true;
   }
 
   if (!clangImporterOpts.UseClangIncludeTree) {
@@ -2049,10 +2051,16 @@ InterfaceSubContextDelegateImpl::runInSubCompilerInstance(StringRef moduleName,
       == originalTargetTriple.getEnvironment()) {
     parsedTargetTriple.setArchName(originalTargetTriple.getArchName());
     subInvocation.setTargetTriple(parsedTargetTriple.str());
+  }
 
-    // Overload the target in the BuildArgs as well
-    BuildArgs.push_back("-target");
-    BuildArgs.push_back(parsedTargetTriple.str());
+  // Find and overload all "-target" to be parsedTargetTriple. This make sure
+  // the build command for the interface is the same no matter what the parent
+  // triple is so there is no need to spawn identical jobs.
+  assert(llvm::find(BuildArgs, "-target") != BuildArgs.end() &&
+         "missing target option");
+  for (unsigned idx = 0, end = BuildArgs.size(); idx < end; ++idx) {
+    if (BuildArgs[idx] == "-target" && ++idx < end)
+      BuildArgs[idx] = parsedTargetTriple.str();
   }
 
   // restore `StrictImplicitModuleContext`
@@ -2403,6 +2411,11 @@ struct ExplicitCASModuleLoader::Implementation {
 
     std::set<std::string> moduleMapsSeen;
     std::vector<std::string> &extraClangArgs = Ctx.ClangImporterOpts.ExtraArgs;
+    // Append -Xclang if we are not in direct cc1 mode.
+    auto appendXclang = [&]() {
+      if (!Ctx.ClangImporterOpts.DirectClangCC1ModuleBuild)
+        extraClangArgs.push_back("-Xclang");
+    };
     for (auto &entry : ExplicitClangModuleMap) {
       const auto &moduleMapPath = entry.getValue().moduleMapPath;
       if (!moduleMapPath.empty() &&
@@ -2421,11 +2434,11 @@ struct ExplicitCASModuleLoader::Implementation {
       }
       auto cachePath = entry.getValue().moduleCacheKey;
       if (cachePath) {
-        extraClangArgs.push_back("-Xclang");
+        appendXclang();
         extraClangArgs.push_back("-fmodule-file-cache-key");
-        extraClangArgs.push_back("-Xclang");
+        appendXclang();
         extraClangArgs.push_back(modulePath);
-        extraClangArgs.push_back("-Xclang");
+        appendXclang();
         extraClangArgs.push_back(*cachePath);
       }
     }

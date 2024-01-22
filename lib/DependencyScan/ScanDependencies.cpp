@@ -294,19 +294,11 @@ static llvm::Error resolveExplicitModuleInputs(
         }
       }
       if (!clangDepDetails->moduleCacheKey.empty()) {
-        auto appendXclang = [&]() {
-          if (!resolvingDepInfo.isClangModule()) {
-            // clang module build using cc1 arg so this is not needed.
-            commandLine.push_back("-Xcc");
-            commandLine.push_back("-Xclang");
-          }
-          commandLine.push_back("-Xcc");
-        };
-        appendXclang();
+        commandLine.push_back("-Xcc");
         commandLine.push_back("-fmodule-file-cache-key");
-        appendXclang();
+        commandLine.push_back("-Xcc");
         commandLine.push_back(remapPath(clangDepDetails->pcmOutputPath));
-        appendXclang();
+        commandLine.push_back("-Xcc");
         commandLine.push_back(clangDepDetails->moduleCacheKey);
       }
 
