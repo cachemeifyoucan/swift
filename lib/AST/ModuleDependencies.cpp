@@ -464,20 +464,11 @@ void SwiftDependencyTracker::addCommonSearchPathDeps(
   }
 
   // Add plugin dylibs from the toolchain only by look through the plugin search
-  // directory and add those within the runtime resource dir.
-  SmallString<256> PluginDir(Opts.RuntimeResourcePath);
-  if (PluginDir.empty())
-    return;
-
-  llvm::sys::path::append(PluginDir, "host");
-  // Helper function to look for plugin to include into CASFS if provided
-  // directory is within the toolchain plugin.
+  // directory.
   auto recordFiles = [&](StringRef Path) {
-    if (!Path.starts_with(PluginDir))
-      return;
     std::error_code EC;
-    for (auto I = FS->dir_begin(Path, EC); I != llvm::vfs::directory_iterator();
-         I = I.increment(EC)) {
+    for (auto I = FS->dir_begin(Path, EC);
+         !EC && I != llvm::vfs::directory_iterator(); I = I.increment(EC)) {
       if (I->type() != llvm::sys::fs::file_type::regular_file)
         continue;
 #if defined(_WIN32)
