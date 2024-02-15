@@ -1428,12 +1428,10 @@ bool ModuleInterfaceLoader::buildSwiftModuleFromSwiftInterface(
                                         SearchPathOpts.CandidateCompiledModules);
 }
 
-static bool readSwiftInterfaceVersionAndArgs(SourceManager &SM,
-                                             DiagnosticEngine &Diags,
-                                             llvm::StringSaver &ArgSaver,
-                                             SwiftInterfaceInfo &interfaceInfo,
-                                             StringRef interfacePath,
-                                             SourceLoc diagnosticLoc) {
+static bool readSwiftInterfaceVersionAndArgs(
+    SourceManager &SM, DiagnosticEngine &Diags, llvm::StringSaver &ArgSaver,
+    SwiftInterfaceInfo &interfaceInfo, StringRef interfacePath,
+    SourceLoc diagnosticLoc, llvm::Triple preferredTarget) {
   llvm::vfs::FileSystem &fs = *SM.getFileSystem();
   auto FileOrError = swift::vfs::getFileOrSTDIN(fs, interfacePath);
   if (!FileOrError) {
@@ -1456,7 +1454,8 @@ static bool readSwiftInterfaceVersionAndArgs(SourceManager &SM,
   }
 
   if (extractCompilerFlagsFromInterface(interfacePath, SB, ArgSaver,
-                                        interfaceInfo.Arguments)) {
+                                        interfaceInfo.Arguments,
+                                        preferredTarget)) {
     InterfaceSubContextDelegateImpl::diagnose(
         interfacePath, diagnosticLoc, SM, &Diags,
         diag::error_extracting_version_from_module_interface);
@@ -1538,9 +1537,10 @@ bool ModuleInterfaceLoader::buildExplicitSwiftModuleFromSwiftInterface(
   llvm::BumpPtrAllocator alloc;
   llvm::StringSaver ArgSaver(alloc);
   SwiftInterfaceInfo InterfaceInfo;
-  readSwiftInterfaceVersionAndArgs(Instance.getSourceMgr(), Instance.getDiags(),
-                                   ArgSaver, InterfaceInfo, interfacePath,
-                                   SourceLoc());
+  readSwiftInterfaceVersionAndArgs(
+      Instance.getSourceMgr(), Instance.getDiags(), ArgSaver, InterfaceInfo,
+      interfacePath, SourceLoc(),
+      Instance.getInvocation().getLangOptions().Target);
 
   auto Builder = ExplicitModuleInterfaceBuilder(
       Instance, &Instance.getDiags(), Instance.getSourceMgr(),
@@ -1699,7 +1699,8 @@ bool InterfaceSubContextDelegateImpl::extractSwiftInterfaceVersionAndArgs(
     CompilerInvocation &subInvocation, SwiftInterfaceInfo &interfaceInfo,
     StringRef interfacePath, SourceLoc diagnosticLoc) {
   if (readSwiftInterfaceVersionAndArgs(SM, *Diags, ArgSaver, interfaceInfo,
-                                       interfacePath, diagnosticLoc))
+                                       interfacePath, diagnosticLoc,
+                                       subInvocation.getLangOptions().Target))
     return true;
 
   SmallString<32> ExpectedModuleName = subInvocation.getModuleName();
@@ -1775,9 +1776,6 @@ InterfaceSubContextDelegateImpl::InterfaceSubContextDelegateImpl(
     genericSubInvocation.getLangOptions().EnableAppExtensionRestrictions = true;
     GenericArgs.push_back("-application-extension");
   }
-
-  // Save the parent invocation's Target Triple
-  ParentInvocationTarget = langOpts.Target;
 
   // Pass down -explicit-swift-module-map-file
   StringRef explicitSwiftModuleMap = searchPathOpts.ExplicitSwiftModuleMap;
@@ -2036,31 +2034,6 @@ InterfaceSubContextDelegateImpl::runInSubCompilerInstance(StringRef moduleName,
   BuildArgs.insert(BuildArgs.end(), SubArgs.begin(), SubArgs.end());
   if (subInvocation.parseArgs(SubArgs, *Diags)) {
     return std::make_error_code(std::errc::not_supported);
-  }
-
-  // If the target triple parsed from the Swift interface file differs
-  // only in subarchitecture from the original target triple, then
-  // we have loaded a Swift interface from a different-but-compatible
-  // architecture slice. Use the original subarchitecture.
-  llvm::Triple parsedTargetTriple(subInvocation.getTargetTriple());
-  if (parsedTargetTriple.getSubArch() != originalTargetTriple.getSubArch() &&
-      parsedTargetTriple.getArch() == originalTargetTriple.getArch() &&
-      parsedTargetTriple.getVendor() == originalTargetTriple.getVendor() &&
-      parsedTargetTriple.getOS() == originalTargetTriple.getOS() &&
-      parsedTargetTriple.getEnvironment()
-      == originalTargetTriple.getEnvironment()) {
-    parsedTargetTriple.setArchName(originalTargetTriple.getArchName());
-    subInvocation.setTargetTriple(parsedTargetTriple.str());
-  }
-
-  // Find and overload all "-target" to be parsedTargetTriple. This make sure
-  // the build command for the interface is the same no matter what the parent
-  // triple is so there is no need to spawn identical jobs.
-  assert(llvm::find(BuildArgs, "-target") != BuildArgs.end() &&
-         "missing target option");
-  for (unsigned idx = 0, end = BuildArgs.size(); idx < end; ++idx) {
-    if (BuildArgs[idx] == "-target" && ++idx < end)
-      BuildArgs[idx] = parsedTargetTriple.str();
   }
 
   // restore `StrictImplicitModuleContext`
