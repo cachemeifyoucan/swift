@@ -195,10 +195,14 @@ static int action_scan_dependency(std::vector<const char *> &Args,
                                   StringRef WorkingDirectory) {
   auto scanner = swiftscan_scanner_create();
   auto invocation = swiftscan_scan_invocation_create();
-  auto error = [&](StringRef msg) {
-    llvm::errs() << msg << "\n";
+
+  SWIFT_DEFER {
     swiftscan_scan_invocation_dispose(invocation);
     swiftscan_scanner_dispose(scanner);
+  };
+
+  auto error = [&](StringRef msg) {
+    llvm::errs() << msg << "\n";
     return EXIT_FAILURE;
   };
 
@@ -230,10 +234,23 @@ static int action_scan_dependency(std::vector<const char *> &Args,
     llvm::errs() << swift::c_string_utils::get_C_string(msg) << "\n";
   }
 
+  auto module_set = swiftscan_dependency_graph_get_dependencies(graph);
+  for (size_t mi = 0; mi < module_set->count; ++mi) {
+    auto m = module_set->modules[mi];
+    auto detail = swiftscan_module_info_get_details(m);
+    if (swiftscan_module_detail_get_kind(detail) !=
+        SWIFTSCAN_DEPENDENCY_INFO_SWIFT_BINARY)
+      continue;
+
+    swiftscan_string_ref_t header =
+        swiftscan_swift_binary_detail_get_header_dependency(detail);
+    if (header.length != 0)
+      llvm::errs() << "header: " << swift::c_string_utils::get_C_string(header)
+                   << "\n";
+  }
+
   swift::dependencies::writeJSON(llvm::outs(), graph);
 
-  swiftscan_scan_invocation_dispose(invocation);
-  swiftscan_scanner_dispose(scanner);
   return EXIT_SUCCESS;
 }
 
